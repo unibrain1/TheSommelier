@@ -4,15 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize]
     branches: ["main", "milestone/*"]
-  pull_request_review_comment:
-    types: [created]
-  issue_comment:
-    types: [created]
 
 jobs:
   secrets-check:
     name: Secrets Scan
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -23,52 +18,3 @@ jobs:
       - uses: trufflesecurity/trufflehog@main
         with:
           extra_args: --only-verified
-
-  claude-code-review:
-    name: Claude Code Review
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-      issues: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6.0.2
-        with:
-          fetch-depth: 1
-      - uses: anthropics/claude-code-action@beta
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          direct_prompt: |
-            Review this pull request against the project conventions in CLAUDE.md.
-
-            **Pipeline & Scripts:**
-            ❌ FAIL if scripts silently swallow errors instead of failing loudly
-            ❌ FAIL if JSON data contracts between scripts are inconsistent
-            ❌ FAIL if pipeline execution order is wrong (dependencies must run first)
-            ⚠️  WARN if error messages go to stdout instead of stderr
-            ⚠️  WARN if broad exception catches mask programming errors
-
-            **Security:**
-            ❌ FAIL if secrets or credentials could be logged or exposed
-            ❌ FAIL if command injection is possible via unsanitized input
-            ⚠️  WARN if 1Password references are used where literal values are expected
-
-            **Code Quality:**
-            ❌ FAIL if shared utilities in wine_utils.py are duplicated in scripts
-            ⚠️  WARN about missing test coverage for new functionality
-            ⚠️  WARN if CLAUDE.md is not updated for new scripts, env vars, or pipeline changes
-
-            **REVIEW OUTPUT FORMAT:**
-            1. ❌ **BLOCKING ISSUES** — Must fix before merge
-            2. ⚠️  **WARNINGS** — Should be addressed
-            3. ✅ **GOOD PRACTICES** — Highlight what's done well
-            4. 💡 **SUGGESTIONS** — Optional improvements
-
-            For each issue, reference the specific file and line number.
-          allowed_tools: |
-            Read(CLAUDE.md)
-            Read(docs/menu-guide.md)
-            Grep
-            Glob
