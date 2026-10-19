@@ -1,113 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 Personal wine cellar management project. Maintains a multi-year wine drinking plan synchronized with a live CellarTracker inventory and a Google Calendar menu plan. A nightly pipeline generates a fresh plan, adds tasting notes via Claude, and publishes a web app.
 
-## Pipeline Flow
-
-```
-SELF-UPDATE
-  └── git pull (picks up code changes without rebuild)
-
-FETCH (scripted, parallel)
-  ├── CellarTracker inventory  → data/inventory.tsv → data/inventory.json
-  ├── CellarTracker notes      → data/notes.tsv
-  ├── CellarTracker food tags  → data/foodtags.tsv
-  ├── CellarTracker consumed   → data/consumed.tsv → data/consumed.json
-  ├── CellarTracker community notes (RSS) → data/community_notes.json (cumulative)
-  └── Google Calendar menu     → data/menu.ics → data/menu.json
-
-GENERATE PLAN (scripted — rules-based) → data/plan.json (staging)
-
-GENERATE NOTES (LLM — Claude Code CLI) → data/plan.json (augmented with CT notes + community notes)
-
-ENRICH MENU (LLM — Claude Code CLI) → data/menu_enriched.json (cache) + data/menu_enriched_full.json
-
-COMPARE & PAIR (scripted, enriched-first fallback to keywords)
-  ├── inventory + plan → data/report.json
-  └── menu + plan + inventory + enriched → data/pairing_suggestions.json
-
-PUBLISH (atomic — site always has complete plan with notes)
-  └── Copy plan.json + pairing_suggestions.json + report.json → site/
-
-GENERATE DIGEST → site/digest.json + site/digest.html (only when menu exists for today)
-
-SEND DIGEST (separate 8am cron via supercronic)
-  └── Gmail SMTP → configured recipients (idempotent, skips routine days)
-```
-
-## Directory Structure
-
-```
-site/                         — Served by nginx (data + presentation + style separated)
-  index.html                  — App shell (HTML structure + JS rendering logic)
-  style.css                   — All CSS styles (Sandstone color scheme)
-  picklist.html               — Standalone picklist view
-  picklist.css                — Picklist styles
-  plan.json                   — Plan data: allWeeks, quarterInfo, changelog (generated)
-  pairing_suggestions.json    — Pairing suggestions (generated)
-  report.json                 — Inventory diff report (generated)
-  digest.json                 — Morning digest data (generated, today's wine + pairings)
-  digest.html                 — Morning digest email body (generated)
-  thisweek.json               — Current week's plan entry (generated, for HA integration)
-  today.json                  — Today's pairing entry (generated, for HA integration)
-scripts/
-  plan_config.py              — Holidays + evolution tracks (gitignored, personal)
-  plan_config.py.sample       — Template for plan_config.py
-  wine_utils.py               — Shared: CURRENT_YEAR, TYPE_TO_BADGE, normalize, urgency_score, call_claude, extract_json, find_current_week
-  scoring.py                  — Composite scoring: composite_score, window/seasonal/diversity/CT/community components
-  generate_plan.py            — Deterministic plan generator (rules-based)
-  generate_notes.py           — Tasting notes (Claude CLI, augmented with CT notes/food tags/community notes)
-  wine_keywords.py            — Single source of truth for food keywords and pairing rules
-  parse_inventory.py          — inventory.tsv → inventory.json
-  parse_consumed.py           — consumed.tsv → consumed.json (consumption history)
-  fetch_community_notes.py    — RSS feed → community_notes.json (cumulative cache, deduped by iNote)
-  enrich_menu.py              — LLM extraction of structured food features → menu_enriched.json (hash-keyed cache)
-  generate_digest.py          — Morning digest: tonight's wine + menu pairings → digest.json + digest.html
-  send_digest.py              — Send digest via Gmail SMTP (--dry-run, --force, idempotent)
-  parse_menu.py               — menu.ics → menu.json (Google Calendar .ics feed)
-  compare.py                  — inventory.json + plan.json → report.json
-  pairing.py                  — menu.json + plan.json + inventory.json → pairing_suggestions.json
-  thisweek.py                 — Find current week's entry from plan.json (used by HA integration)
-  today.py                    — Find today's menu/pairing entry from plan.json (used by HA integration)
-tests/
-  test_scoring.py             — Unit tests for all scoring components
-  test_pairing_enriched.py    — Tests for enriched food-wine pairing
-  test_enrich_menu.py         — Tests for LLM menu enrichment
-  test_fetch_community_notes.py — Tests for RSS community notes fetch
-  test_parse_consumed.py      — Tests for consumption history parsing
-  test_parse_inventory.py     — Tests for inventory parsing
-  test_generate_digest.py     — Tests for morning digest generation
-  test_send_digest.py         — Tests for digest email sending
-  test_diff_plans.py          — Tests for plan diff/changelog logic
-docs/
-  menu-guide.md               — How to write menu entries for best pairing results
-plans/                        — Design specs and algorithm proposals (gitignored)
-data/                         — Staging area + generated artifacts (gitignored)
-  plan.json                   — Staged plan (copied to site/ after notes generated)
-  plan_previous.json          — Backup of previous live plan (for changelog diff)
-  consumed.json               — Parsed consumption history (generated from consumed.tsv)
-  community_notes.json        — Cumulative community tasting notes cache (from RSS, keyed by iWine)
-  menu_enriched.json          — LLM enrichment cache (keyed by text hash, persists across runs)
-  menu_enriched_full.json     — Full enriched menu with all entries (regenerated each run)
-  digest_last_sent.txt        — Idempotency state file for send_digest.py (date of last send)
-conftest.py                   — pytest config: adds scripts/ to sys.path
-pyrightconfig.json            — Pyright type checking config
-pipeline.sh                   — Shared pipeline logic (sourced by fetch.sh and fetch_docker.sh)
-fetch.sh                      — Local pipeline entry point
-fetch_docker.sh               — Docker pipeline entry point
-send_digest.sh                — Wrapper: resolves SMTP creds from 1Password, runs send_digest.py
-Dockerfile                    — Python 3.12 + nginx + 1Password + Claude CLI + supercronic + git
-docker-compose.yml            — the-sommelier on port 8089 + Traefik proxy + run-now profile
-entrypoint.sh                 — git pull, starts nginx, schedules cron, runs initial sync
-nginx.conf                    — Serves site/ directory on port 8080 (non-root)
-requirements.txt              — Python dependencies (icalendar)
-.env                          — Secrets (gitignored)
-.env.sample                   — Template for .env (no secrets)
-```
+The pipeline flow is in `README.md`. `plans/` and `data/` are gitignored.
 
 ## Running the Pipeline
 
@@ -117,45 +14,11 @@ bash fetch.sh
 
 ## Running Tests
 
-```bash
-python3 -m pytest tests/ -v
-```
-
-Tests require `pytest` (install via `pip install pytest`). The `conftest.py` at project root adds `scripts/` to `sys.path`. Pyright is configured to exclude `tests/` (see `pyrightconfig.json`).
-
-## Linting
-
-```bash
-ruff check scripts/ && ruff format --check scripts/  # check only
-ruff check --fix scripts/ && ruff format scripts/    # auto-fix lint + formatting
-```
+Tests require `pytest` (install via `pip install pytest`).
 
 ## Docker Deployment
 
-Production runs on **docker02**. To restart or rebuild the running application, SSH to docker02:
-
-```bash
-# SSH to production host
-ssh docker02
-
-# Project directory
-cd /home/ansible/container/the-sommelier
-
-# First time or Dockerfile changes
-docker compose up --build -d
-
-# Code changes only (scripts, pipeline) — no rebuild needed
-docker compose down && docker compose up -d
-
-# One-shot test run
-docker compose run --rm run-now
-
-# View pipeline logs
-docker logs the-sommelier --tail 100
-```
-
-Container: `the-sommelier`. Runs as non-root (configurable UID/GID in compose). Uses supercronic.
-Sync schedule configurable via `SYNC_SCHEDULE` env var (default: `0 2 * * *`).
+Production runs on **docker02**. Commands to restart, rebuild, or read logs are in the `deploy` skill (`.claude/skills/deploy/SKILL.md`).
 
 Self-updating: container does `git pull` on startup and before each pipeline run.
 Code changes pushed to GitHub are picked up automatically on next `down/up` or scheduled run.
@@ -166,22 +29,6 @@ Code changes pushed to GitHub are picked up automatically on next `down/up` or s
 - **CellarTracker is the system of record** for all wine metadata: Type/badge, Varietal, Appellation, scores, drinking windows, quantity.
 - **Scripted rules** handle: plan generation (scheduling, priority, seasonal fit, evolution, holidays), inventory comparison, food-wine pairing suggestions.
 - **Claude (LLM)** handles: tasting note generation and menu enrichment. Notes are contextual 1-2 sentence descriptions augmented with CellarTracker notes and food tags. Menu enrichment extracts structured food features (protein, preparation, richness, etc.) for pairing. If Claude CLI is unavailable, the pipeline continues with empty notes and falls back to keyword-based pairing.
-
-## Architecture: Data / Presentation / Style
-
-- **Data** — `site/plan.json`, `site/pairing_suggestions.json`, `site/report.json`. All JSON, all generated. Staged in `data/` first, copied to `site/` atomically after all steps complete.
-- **Presentation** — `site/index.html`. App shell with JS rendering. Fetches JSON on load.
-- **Style** — `site/style.css`. Sandstone color scheme (Bootswatch).
-
-## plan.json Structure
-
-Generated by `generate_plan.py`. Contains:
-- `allWeeks`: 52 entries, one per week
-- `quarterInfo`: seasonal section headers
-- `changelog`: diff vs previous live plan (from `site/plan.json`)
-
-All metadata (badge, appellation, window, score) comes from CellarTracker inventory.
-Notes come from Claude (augmented with CT notes/food tags). Scheduling decisions come from rules.
 
 ## Plan Generation Rules
 
@@ -220,11 +67,7 @@ Implemented in `scripts/generate_plan.py`:
 
 ## Home Assistant Integration
 
-- HA config is mounted locally at `/Volumes/config`
-- `thisweek.json` and `today.json` are pushed via SSH to `/config/www/` on HA during each pipeline run
-- HA reads them via REST sensors (`scan_interval: 3600`) defined in `/Volumes/config/configuration.yaml`
-- To force HA to re-poll immediately: **Developer Tools → Actions → `rest.reload`**
-- If HA push fails, check SSH key `~/.ssh/id_ed25519_ha` on docker02 and `authorized_keys` on HA
+The Home Assistant push and its troubleshooting steps are in the `deploy` skill (`.claude/skills/deploy/SKILL.md`).
 
 ## Deployment Gotchas
 

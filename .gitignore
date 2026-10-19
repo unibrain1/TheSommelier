@@ -40,5 +40,6 @@ site/pairing_suggestions.json
 site/report.json
 site/thisweek.json
 site/today.json
-The-Sommelier.code-workspace
-TheSommelier.code-workspace
+
+# Editor files
+*.code-workspace
