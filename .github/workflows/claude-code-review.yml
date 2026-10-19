@@ -1,33 +1,40 @@
 name: Claude Code Review
 
+# Reviews each non-draft PR against CLAUDE.md. Posts line findings as inline
+# comments and one summary comment. The last step fails the job if Claude
+# posted no summary.
+#
+# Skipped: draft PRs, Dependabot PRs (Dependabot runs get no secrets), and
+# titles that contain [skip-review].
+#
+# The action does not run when a PR changes this file (the PR copy differs
+# from main). A person must review such a PR. The change takes effect after
+# the merge.
+
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    types: [opened, synchronize, ready_for_review]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
-  claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
+  review:
+    if: |
+      github.event.pull_request.draft == false &&
+      github.actor != 'dependabot[bot]' &&
+      !contains(github.event.pull_request.title, '[skip-review]')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: read
       id-token: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 1
 
@@ -36,8 +43,72 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request against the project rules in CLAUDE.md.
+            Read CLAUDE.md first. Get the diff with `gh pr diff`.
+
+            Check these items:
+
+            Pipeline and scripts:
+            - Blocking: a script swallows an error instead of failing loudly.
+            - Blocking: the JSON data contracts between scripts do not agree.
+            - Blocking: the pipeline runs a step before the step it depends on.
+            - Important: an error message goes to stdout instead of stderr.
+            - Important: a broad exception catch hides a programming error.
+
+            Security:
+            - Blocking: a secret or credential can go into a log or the output.
+            - Blocking: unsanitized input can cause command injection.
+            - Important: a 1Password reference is used where a literal value is expected.
+
+            Code quality:
+            - Blocking: a script copies a shared utility from wine_utils.py.
+            - Important: new functionality has no test.
+            - Important: CLAUDE.md is not updated for a new script, env var or pipeline change.
+
+            Output:
+            1. For each finding on a specific line, post an inline comment with
+               `mcp__github_inline_comment__create_inline_comment` (confirmed: true).
+            2. Post one summary comment with `gh pr comment`. Start it with the
+               heading `## Claude review`. Then use the headings
+               `### Blocking`, `### Important` and `### Minor`. Leave out a
+               heading that has no findings. If there are no findings, write
+               "No issues found." under the first heading.
+            3. Report only findings that you checked in the code. Give the file
+               and the line for each finding.
+
+            Post only GitHub comments. Do not send the review as a message.
+          claude_args: |
+            --model claude-sonnet-5-5
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
+
+      - name: Fail if no review was posted
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
+        run: |
+          count=$(gh pr view "$PR_NUM" --repo "$REPO" --json comments \
+            --jq '[.comments[] | select(.body | startswith("## Claude review"))] | length')
+          if [ "$count" -gt 0 ]; then
+            exit 0
+          fi
+          # The action does not run when this file on the PR head differs from
+          # main. Give a warning only when that is the cause: no execution
+          # file, and the two blob SHAs differ. An empty lookup counts as no.
+          WF_PATH='.github/workflows/claude-code-review.yml'
+          MAIN_BLOB=$(gh api "repos/${REPO}/contents/${WF_PATH}?ref=main" --jq .sha 2>/dev/null || true)
+          HEAD_BLOB=$(gh api "repos/${REPO}/contents/${WF_PATH}?ref=${HEAD_SHA}" --jq .sha 2>/dev/null || true)
+          if [ -z "$EXECUTION_FILE" ] && [ -n "$MAIN_BLOB" ] && [ -n "$HEAD_BLOB" ] \
+             && [ "$MAIN_BLOB" != "$HEAD_BLOB" ]; then
+            echo "::warning::No review posted. The action did not run, because ${WF_PATH} on this PR differs from main. A person must review this PR."
+            exit 0
+          fi
+          echo "::error::No Claude review comment found on this PR."
+          exit 1
