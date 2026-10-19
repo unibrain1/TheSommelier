@@ -1,10 +1,11 @@
 name: Claude Code Review
 
 # Reviews each non-draft PR against CLAUDE.md. Posts line findings as inline
-# comments and one summary comment. If Claude ends the run without the
-# summary (for example after a denied tool call), the fallback step posts
-# Claude's final text from the execution file. The last step fails the job
-# if no summary from this run exists.
+# comments and one summary comment. track_progress makes the action post a
+# progress comment and update it with the result, so a review comment exists
+# even when Claude's own gh pr comment call is denied. The last step fails the
+# job if Claude posted no comment in this run, or if the review has content
+# under "### Blocking". Same pattern as mock-brevo and MyGunLog.
 #
 # Skipped: draft PRs, Dependabot PRs (Dependabot runs get no secrets), and
 # titles that contain [skip-review].
@@ -49,6 +50,7 @@ jobs:
         uses: anthropics/claude-code-action@5eb090f3c3afd701a0672cd32981197ca27688f6 # v1.0.253
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -78,62 +80,33 @@ jobs:
             Output:
             1. For each finding on a specific line, post an inline comment with
                `mcp__github_inline_comment__create_inline_comment` (confirmed: true).
-            2. Post one summary comment with `gh pr comment`. Start it with the
-               heading `## Claude review`. Then use the headings
-               `### Blocking`, `### Important` and `### Minor`. Leave out a
-               heading that has no findings. If there are no findings, write
-               "No issues found." under the first heading.
-            3. Report only findings that you checked in the code. Give the file
+               Put each inline finding in the summary too, under its heading,
+               with the file and the line. The gate reads only the summary.
+            2. Write one summary to `/tmp/claude-review.md` with the Write tool.
+               Start it with the heading `## Claude review`. Then use these
+               headings, and leave out each heading that has no content:
+               - `### Blocking`: a bug, a security problem, or a break of a
+                 CLAUDE.md rule. The job fails while this section has content.
+               - `### Important`: a real risk, or a missing test or doc update.
+               - `### Suggestions`: an optional improvement.
+               - `### Strengths`: what the PR does well.
+               If there are no findings, write only "No issues found." after the
+               first heading. Do not write "None" under a heading.
+            3. Post the summary with this one-line command:
+
+                 gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/claude-review.md
+
+               Do not put the summary text in the command. A command with more
+               than one line is denied. Post the summary before you end the turn.
+            4. Report only findings that you checked in the code. Give the file
                and the line for each finding.
-
-            Post the summary before you end the turn. Nothing else posts it,
-            and the review is not done until the `gh pr comment` call ran.
-            Use this command:
-
-              gh pr comment ${{ github.event.pull_request.number }} --body "..."
 
             Post only GitHub comments. Do not send the review as a message.
           claude_args: |
             --model claude-sonnet-5-5
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Read,Grep,Glob"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Read,Write,Grep,Glob"
 
-      - name: Post the review if Claude did not post it
-        if: always() && steps.claude-review.outputs.execution_file != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUM: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-          EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
-          STARTED: ${{ steps.start.outputs.time }}
-        run: |
-          # Claude posts the summary with its own gh pr comment call. A denied
-          # tool call can end the run before that call. Then post Claude's
-          # final text from the execution file, so that the review is not lost.
-          if [ -z "$STARTED" ] || [ ! -f "$EXECUTION_FILE" ]; then
-            exit 0
-          fi
-          count=$(gh pr view "$PR_NUM" --repo "$REPO" --json comments \
-            | jq --arg s "$STARTED" '[.comments[] | select(.createdAt >= $s) | select(.body | startswith("## Claude review"))] | length')
-          if [ "$count" -gt 0 ]; then
-            exit 0
-          fi
-          result=$(jq -r '[.[] | select(.type == "result")] | last | .result // ""' "$EXECUTION_FILE")
-          denials=$(jq -r '[.[] | select(.type == "result")] | last | .permission_denials_count // 0' "$EXECUTION_FILE")
-          if [ -z "$result" ]; then
-            echo "::warning::Claude posted no summary, and the execution file has no final text."
-            exit 0
-          fi
-          {
-            echo "## Claude review"
-            echo
-            echo "> Claude did not post this summary itself (permission denials: ${denials}). This step posted Claude's final text."
-            echo
-            printf '%s\n' "$result" | sed '1{/^## Claude review/d;}'
-          } > "$RUNNER_TEMP/fallback-review.md"
-          gh pr comment "$PR_NUM" --repo "$REPO" --body-file "$RUNNER_TEMP/fallback-review.md"
-          echo "::warning::Claude posted no summary. The fallback step posted Claude's final text."
-
-      - name: Fail if no review was posted
+      - name: Fail if no review was posted, or if it has Blocking findings
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -143,31 +116,47 @@ jobs:
           EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
           STARTED: ${{ steps.start.outputs.time }}
         run: |
-          # Count only a summary from this run. A summary from an earlier run
-          # does not count. Without a start time, the check fails.
+          # Use only Claude comments from this run: the track_progress comment
+          # and the summary comment. Comments from earlier runs, from people,
+          # and error comments do not count. Without a start time, the check
+          # fails.
           if [ -z "$STARTED" ]; then
             echo "::error::No run start time. Cannot check for a review from this run."
             exit 1
           fi
-          count=$(gh pr view "$PR_NUM" --repo "$REPO" --json comments \
-            | jq --arg s "$STARTED" '[.comments[] | select(.createdAt >= $s) | select(.body | startswith("## Claude review"))] | length')
-          if [ "$count" -gt 0 ]; then
-            exit 0
+          gh api --paginate "repos/${REPO}/issues/${PR_NUM}/comments" \
+            --jq '.[] | select(.user.login == "claude[bot]") | select(.created_at >= env.STARTED) | select(.body | contains("Claude encountered an error") | not) | .body' \
+            > "$RUNNER_TEMP/review.md"
+          if [ ! -s "$RUNNER_TEMP/review.md" ]; then
+            # The action does not run when this file on the PR head differs
+            # from main. Give a warning only when that is the cause: no
+            # execution file, and the two blob SHAs differ. An empty lookup
+            # counts as no. A 404 on main means that this PR adds the file.
+            WF_PATH='.github/workflows/claude-code-review.yml'
+            MAIN_BLOB=$(gh api "repos/${REPO}/contents/${WF_PATH}?ref=main" --jq .sha 2>"$RUNNER_TEMP/main_err" || true)
+            if [ -z "$MAIN_BLOB" ] && grep -q 'HTTP 404' "$RUNNER_TEMP/main_err"; then
+              MAIN_BLOB=none
+            fi
+            HEAD_BLOB=$(gh api "repos/${REPO}/contents/${WF_PATH}?ref=${HEAD_SHA}" --jq .sha 2>/dev/null || true)
+            if [ -z "$EXECUTION_FILE" ] && [ -n "$MAIN_BLOB" ] && [ -n "$HEAD_BLOB" ] \
+               && [ "$MAIN_BLOB" != "$HEAD_BLOB" ]; then
+              echo "::warning::No review posted. The action did not run, because ${WF_PATH} on this PR differs from main. A person must review this PR."
+              exit 0
+            fi
+            echo "::error::No Claude review comment from this run found on this PR (run started ${STARTED})."
+            exit 1
           fi
-          # The action does not run when this file on the PR head differs from
-          # main. Give a warning only when that is the cause: no execution
-          # file, and the two blob SHAs differ. An empty lookup counts as no.
-          # A 404 on main means that this PR adds the file. That is a difference.
-          WF_PATH='.github/workflows/claude-code-review.yml'
-          MAIN_BLOB=$(gh api "repos/${REPO}/contents/${WF_PATH}?ref=main" --jq .sha 2>"$RUNNER_TEMP/main_err" || true)
-          if [ -z "$MAIN_BLOB" ] && grep -q 'HTTP 404' "$RUNNER_TEMP/main_err"; then
-            MAIN_BLOB=none
+          # The prompt says to leave out an empty section. It cannot make sure
+          # of that, so an empty Blocking section ("None", "N/A", "No issues
+          # found.") does not count.
+          SECTION=$(awk '
+            /^#{1,6}[[:space:]]+Blocking[[:space:]]*$/ { capture=1; next }
+            /^#{1,6}[[:space:]]/ { capture=0 }
+            capture { print }
+          ' "$RUNNER_TEMP/review.md")
+          NORMALIZED=$(echo "$SECTION" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]' | sed -E 's/^(none\.?|n\/a\.?|-|noissuesfound\.?)+$//')
+          if [ -n "$NORMALIZED" ]; then
+            echo "::error::Review posted Blocking findings. Fix them before merging; see the PR comment."
+            exit 1
           fi
-          HEAD_BLOB=$(gh api "repos/${REPO}/contents/${WF_PATH}?ref=${HEAD_SHA}" --jq .sha 2>/dev/null || true)
-          if [ -z "$EXECUTION_FILE" ] && [ -n "$MAIN_BLOB" ] && [ -n "$HEAD_BLOB" ] \
-             && [ "$MAIN_BLOB" != "$HEAD_BLOB" ]; then
-            echo "::warning::No review posted. The action did not run, because ${WF_PATH} on this PR differs from main. A person must review this PR."
-            exit 0
-          fi
-          echo "::error::No Claude review comment from this run found on this PR (run started ${STARTED})."
-          exit 1
+          echo "No Blocking findings in the review."
