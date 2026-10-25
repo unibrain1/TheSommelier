@@ -1,0 +1,47 @@
+# Optional host-specific settings for docker-compose.yml.
+#
+# To use this file:
+#   1. Copy it to docker-compose.override.yml (git ignores that file).
+#   2. Replace each placeholder. Docker creates an empty directory for a
+#      bind-mount source that does not exist, so set a real key path.
+#   3. Remove the parts that you do not need.
+#
+# Docker Compose reads docker-compose.override.yml automatically when you do
+# not use -f. It adds "dns" and "ports" to the lists in docker-compose.yml, so
+# set these keys in this file only.
+services:
+  the-sommelier:
+    volumes:
+      # Key for the Home Assistant push. Without it, the pipeline skips the push.
+      # Use a key for this push only, and set its mode to 600.
+      - ~/.ssh/<ha-key>:/run/secrets/ha_ssh_key:ro
+    dns:
+      - 192.0.2.10
+      - 192.0.2.11
+      - 8.8.8.8
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.the-sommelier.entrypoints: https
+      traefik.http.routers.the-sommelier.rule: Host(`sommelier.example.com`)
+      traefik.http.routers.the-sommelier.tls: 'true'
+      traefik.http.services.the-sommelier.loadbalancer.server.port: '8080'
+    networks:
+      - traefik_proxy
+    # This publishes the site on all host interfaces. Traefik does not need it.
+    # To limit it to the host, use "127.0.0.1:8089:8080".
+    ports:
+      - "8089:8080"
+
+  run-now:
+    volumes:
+      - ~/.ssh/<ha-key>:/run/secrets/ha_ssh_key:ro
+    dns:
+      - 192.0.2.10
+      - 192.0.2.11
+      - 8.8.8.8
+    networks:
+      - traefik_proxy
+
+networks:
+  traefik_proxy:
+    external: true

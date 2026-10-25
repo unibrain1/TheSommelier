@@ -20,11 +20,14 @@ Tests require `pytest` (install via `pip install pytest`).
 
 Production runs in Docker on the owner's homelab server. The commands to restart, rebuild, or read logs on that server are in a local `deploy` skill. That skill is not in git.
 
+`docker-compose.yml` is generic. Host settings (DNS, port, Traefik labels and network, HA SSH key) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. On the production server, the HomeLab Ansible deploy writes the override. It must never write the tracked `docker-compose.yml`, because a modified tracked file makes `git pull --ff-only` fail.
+
 The morning digest embeds `site/logo.png`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
 Self-updating: container does `git pull` on startup and before each pipeline run.
 Code changes pushed to GitHub are picked up automatically on next `down/up` or scheduled run.
 `docker compose restart` does NOT re-run the entrypoint — use `down/up` instead.
+`restart` keeps the stored container config. `down/up` and `run-now` read both compose files when they run.
 
 ## LLM vs Data Boundary
 
