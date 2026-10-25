@@ -1,5 +1,6 @@
 # Secrets and personal config
 .env
+.env.secrets
 scripts/plan_config.py
 
 # Generated data
@@ -40,6 +41,8 @@ site/pairing_suggestions.json
 site/report.json
 site/thisweek.json
 site/today.json
+site/digest.html
+site/digest.json
 
 # Editor files
 *.code-workspace
