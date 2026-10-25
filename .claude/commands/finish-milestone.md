@@ -2,6 +2,8 @@
 
 Create a PR to merge a completed milestone branch into main. Includes a docs audit.
 
+Replace each `<name>` placeholder in this file with the real value before you use it.
+
 ## Arguments
 
 - `$ARGUMENTS` — the milestone version number (e.g., `v1.2.0`)
@@ -17,7 +19,7 @@ Create a PR to merge a completed milestone branch into main. Includes a docs aud
 2. **Check for open issues** in the milestone:
 
    ```bash
-   gh issue list --milestone "<full milestone title>" --state open --json number,title
+   gh issue list --milestone "<milestone-title>" --state open --json number,title
    ```
 
    If open issues exist, warn and ask whether to proceed or finish them first.
@@ -79,15 +81,15 @@ Create a PR to merge a completed milestone branch into main. Includes a docs aud
    gh pr create \
      --base main \
      --head milestone/$ARGUMENTS \
-     --title "$ARGUMENTS — <milestone name>" \
+     --title "$ARGUMENTS — <milestone-title>" \
      --body "$(cat <<'EOF'
    ## Summary
 
-   <1-2 sentence description>
+   <short-description>
 
    ## Issues Resolved
 
-   - #<number> — <title> (PR #<pr_number>)
+   - #<issue-number> — <issue-title> (PR #<pr-number>)
 
    ## Test Plan
 

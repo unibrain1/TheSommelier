@@ -2,6 +2,8 @@
 
 Plan and implement the current issue. Reads the issue from the current branch name.
 
+Replace each `<name>` placeholder in this file with the real value before you use it.
+
 ## Arguments
 
 - `$ARGUMENTS` — (optional) additional instructions or constraints for the implementation.
@@ -10,10 +12,10 @@ Plan and implement the current issue. Reads the issue from the current branch na
 
 1. **Identify the issue**:
 
-   Extract the issue number from the current branch. The branch must match `bug/<number>-*`, `feature/<number>-*` or `issue/<number>-*` (see the branch-naming convention in `CLAUDE.md`). If the branch doesn't match, stop and ask the user to switch to the issue branch, or to run `/start-issue` if no branch exists.
+   Extract the issue number from the current branch. The branch must match `bug/<issue-number>-*`, `feature/<issue-number>-*` or `issue/<issue-number>-*` (see the branch-naming convention in `CLAUDE.md`). If the branch doesn't match, stop and ask the user to switch to the issue branch, or to run `/start-issue` if no branch exists.
 
    ```bash
-   gh issue view <number> --json number,title,body,milestone,labels
+   gh issue view <issue-number> --json number,title,body,milestone,labels
    ```
 
 2. **Read the relevant code directly** (do NOT delegate to agents):
@@ -59,7 +61,7 @@ Plan and implement the current issue. Reads the issue from the current branch na
 6. **Hand off**:
 
    ```text
-   Implementation complete for issue #<number>. Next steps:
+   Implementation complete for issue #<issue-number>. Next steps:
    1. Review the changes: `git diff`
    2. `/simplify`        — Review changed code for reuse, quality, and efficiency
    3. `/commit`          — Commit your changes

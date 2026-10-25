@@ -7,6 +7,8 @@ description: Create a new GitHub issue with PM-driven scope refinement and exper
 This command helps create well-defined GitHub issues by engaging specialized
 agents to refine scope, architecture, testing, and documentation requirements.
 
+Replace each `<name>` placeholder in this file with the real value before you use it.
+
 ## Workflow Steps
 
 ### Step 1: Get the Problem Statement
@@ -25,13 +27,15 @@ Launch Explore agents to understand the relevant parts of the codebase:
 - One agent to find code areas related to the problem statement
 - One agent to check for existing related issues or prior art
 
+Replace `<keywords>` with keywords from the user's problem statement.
+
 ```bash
-gh issue list --state all --search "RELEVANT_KEYWORDS" --limit 10
+gh issue list --state all --search "<keywords>" --limit 10
 ```
 
 Check for duplicate or related issues. If found, inform the user:
 
-"I found these related issues: [list]. Should we continue with a new issue,
+"I found these related issues: <related-issues>. Should we continue with a new issue,
 or does one of these already cover your need?"
 
 Wait for confirmation before proceeding.
@@ -121,7 +125,7 @@ create it?"
 If the user requests changes, update the draft and re-present. If the experts
 raised concerns that the user hasn't addressed, flag them:
 
-"The architect noted [concern]. Should we address this in the issue scope or
+"The architect noted <concern>. Should we address this in the issue scope or
 create a separate issue for it?"
 
 ### Step 7: Create the Issue
@@ -132,8 +136,8 @@ with a separate `--label` flag, and include `--milestone` if one was selected:
 ```bash
 gh issue create \
   --title "Issue title" \
-  --label "LABEL_1" --label "LABEL_2" \
-  --milestone "MILESTONE_NAME" \
+  --label "<label>" \
+  --milestone "<milestone-title>" \
   --body "$(cat <<'EOF'
 ## Problem
 
@@ -173,10 +177,10 @@ After creation, display the issue URL and number.
 
 After creating the issue, ask:
 
-"Issue #NUMBER created: URL
+"Issue #<issue-number> created: <issue-url>
 
 Would you like to:
 
-1. Start working on it now? (`/start-issue NUMBER`)
+1. Start working on it now? (`/start-issue <issue-number>`)
 2. Create another related issue?
 3. That's all for now."
