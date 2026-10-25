@@ -9,9 +9,10 @@ When the user runs `/release`, execute this comprehensive release workflow:
 ## Phase 1: Pre-Flight Checks & Analysis
 
 1. **Verify Prerequisites**
-   - Check we're on main branch: `git branch --show-current`
-   - Check for uncommitted changes: `git status --porcelain`
-   - Check sync with origin: compare `git rev-parse HEAD` with `git rev-parse origin/main`
+   - Check the branch: `git branch --show-current`. The output must be exactly `main`. If not, stop.
+   - Check the working tree: `git status --porcelain`. The output must be empty. If not, stop.
+   - Check the sync with origin: run `git fetch origin`. If the fetch fails, stop. Then compare `git rev-parse HEAD` with `git rev-parse origin/main`. The two hashes must be equal. If not, stop.
+   - If a check fails, tell the user which check failed. Do not continue the release.
 
 2. **Get Current State**
    - Get last release tag: `git describe --tags --abbrev=0`
