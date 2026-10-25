@@ -10,7 +10,7 @@ Plan and implement the current issue. Reads the issue from the current branch na
 
 1. **Identify the issue**:
 
-   Extract the issue number from the current branch (`issue/<number>-*`). If the branch doesn't match, stop and ask the user to run `/start-issue` first.
+   Extract the issue number from the current branch. The branch must match `bug/<number>-*`, `feature/<number>-*` or `issue/<number>-*` (see the branch-naming convention in `CLAUDE.md`). If the branch doesn't match, stop and ask the user to switch to the issue branch, or to run `/start-issue` if no branch exists.
 
    ```bash
    gh issue view <number> --json number,title,body,milestone,labels

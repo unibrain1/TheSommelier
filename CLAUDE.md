@@ -88,3 +88,4 @@ The Home Assistant push and its troubleshooting steps are in the `deploy` skill 
 - Community signals use RSS note data: recent score drift, note velocity, text-based window drift detection
 - Plan labels show best available critic score: WA → WS → BH → AG → JR → JS → JG → CT
 - `scoring.py` also owns `seasonal_score()` and red-subtype helpers (moved from `generate_plan.py` to avoid circular imports)
+- Branch naming for issue work: `bug/<n>-<slug>` for bug-labeled issues, `feature/<n>-<slug>` for enhancements, `issue/<n>-<slug>` for all other issues. Issue PRs target the active milestone branch, not `main`.
