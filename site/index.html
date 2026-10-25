@@ -20,11 +20,14 @@
       <div class="header-sub">52-week plan &nbsp;&middot;&nbsp; One bottle per week</div>
     </div>
   </div>
-  <div class="stats">
-    <div class="stat"><span class="stat-num" id="stat-planned">—</span><span class="stat-lbl">Bottles Planned</span></div>
-    <div class="stat"><span class="stat-num" id="stat-urgent">—</span><span class="stat-lbl">Urgent / Past Peak</span></div>
-    <div class="stat"><span class="stat-num" id="stat-evolution">—</span><span class="stat-lbl">Evolution Tastings</span></div>
-    <div class="stat"><span class="stat-num" id="stat-pairings">—</span><span class="stat-lbl">Menu Pairings</span></div>
+  <div class="header-stats">
+    <div class="stats">
+      <div class="stat"><span class="stat-num" id="stat-planned">—</span><span class="stat-lbl">Bottles Planned</span></div>
+      <div class="stat"><span class="stat-num" id="stat-urgent">—</span><span class="stat-lbl">Urgent / Past Peak</span></div>
+      <div class="stat"><span class="stat-num" id="stat-evolution">—</span><span class="stat-lbl">Evolution Tastings</span></div>
+      <div class="stat"><span class="stat-num" id="stat-pairings">—</span><span class="stat-lbl">Menu Pairings</span></div>
+    </div>
+    <div class="header-updated" id="last-updated"></div>
   </div>
 </header>
 
@@ -469,9 +472,20 @@ function applyFilter(f, btn) {
   renderPlan();
 }
 
+// The pipeline copies plan.json to site/ only after a complete run, so the
+// file's Last-Modified time is the time of the last successful refresh.
+function showLastUpdated(lastModified) {
+  if (!lastModified) return;
+  const d = new Date(lastModified);
+  if (isNaN(d)) return;
+  document.getElementById('last-updated').textContent = 'Last updated ' + d.toLocaleString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+  });
+}
+
 // Load plan data and pairing suggestions in parallel, then render
 Promise.all([
-  fetch('plan.json').then(function(r) { return r.json(); }),
+  fetch('plan.json').then(function(r) { showLastUpdated(r.headers.get('Last-Modified')); return r.json(); }),
   fetch('pairing_suggestions.json').then(function(r) { return r.json(); }).catch(function() { return { suggestions: [] }; })
 ]).then(function(results) {
   planData    = results[0];
