@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Personal wine cellar management project. Maintains a multi-year wine drinking plan synchronized with a live CellarTracker inventory and a Google Calendar menu plan. A nightly pipeline generates a fresh plan, adds tasting notes via Claude, and publishes a web app.
+Personal wine cellar management project. Maintains a multi-year wine drinking plan synchronized with a live CellarTracker inventory and a Google Calendar menu plan. A scheduled pipeline (every 30 minutes, 06:00–22:00 Pacific) generates a fresh plan, adds tasting notes via Claude, and publishes a web app.
 
 The pipeline flow is in `README.md`. `plans/` and `data/` are gitignored.
 

@@ -22,9 +22,12 @@ echo "==> Starting web server on port 8080..."
 nginx
 
 # Set up periodic sync with supercronic (runs as non-root)
-SCHEDULE="${SYNC_SCHEDULE:-0 2 * * *}"
+# SYNC_SCHEDULE can hold more than one cron expression, separated by ";".
+# One expression cannot give "every 30 min from 06:00 to 22:00" with the 22:00 run included.
+SCHEDULE="${SYNC_SCHEDULE:-*/30 6-21 * * *;0 22 * * *}"
 DIGEST_SCHEDULE="${DIGEST_SEND_SCHEDULE:-0 8 * * *}"
-echo "${SCHEDULE} cd /app && bash fetch_docker.sh" > /tmp/crontab
+IFS=';' read -ra SYNC_EXPRS <<< "${SCHEDULE}"
+printf '%s cd /app && bash fetch_docker.sh\n' "${SYNC_EXPRS[@]}" > /tmp/crontab
 echo "${DIGEST_SCHEDULE} cd /app && bash send_digest.sh" >> /tmp/crontab
 echo "    Scheduled sync: ${SCHEDULE}"
 echo "    Scheduled digest: ${DIGEST_SCHEDULE}"

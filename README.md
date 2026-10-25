@@ -6,7 +6,7 @@
 
 ![The Sommelier](docs/images/screenshot.png)
 
-Don't let good wine go to waste. The Sommelier is your personal wine advisor — it connects to your [CellarTracker](https://www.cellartracker.com) cellar and generates a 52-week drinking plan that prioritizes bottles past their peak or nearing the end of their drinking window. It fits wines to seasons, anchors special bottles to holidays, and reads your meal plan from Google Calendar to suggest specific pairings from your cellar. Claude adds contextual tasting notes for every bottle. The pipeline runs nightly in a Docker container and publishes a self-updating web app — so your plan always reflects what's actually in your cellar.
+Don't let good wine go to waste. The Sommelier is your personal wine advisor — it connects to your [CellarTracker](https://www.cellartracker.com) cellar and generates a 52-week drinking plan that prioritizes bottles past their peak or nearing the end of their drinking window. It fits wines to seasons, anchors special bottles to holidays, and reads your meal plan from Google Calendar to suggest specific pairings from your cellar. Claude adds contextual tasting notes for every bottle. The pipeline runs every 30 minutes during the day in a Docker container and publishes a self-updating web app — so your plan always reflects what's actually in your cellar.
 
 ## How It Works
 
@@ -145,7 +145,7 @@ docker compose down && docker compose up -d
 docker compose run --rm run-now
 ```
 
-Container: `the-sommelier`. Schedule configurable via `SYNC_SCHEDULE` env var.
+Container: `the-sommelier`. Schedule configurable via `SYNC_SCHEDULE` env var (one or more cron expressions, separated by `;`). The default runs every 30 minutes from 6am to 10pm Pacific, so CellarTracker and Paprika changes show up within 30 minutes.
 Runs as non-root (configure `user` in docker-compose.yml to match your host UID/GID).
 
 ## Menu Plan Setup
