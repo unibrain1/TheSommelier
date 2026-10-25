@@ -73,7 +73,7 @@ This project runs on a schedule in a Docker container. It reads data from extern
 
 ## Severity
 
-Use this scale. The `/release` and `/security-review` commands use it to decide if a release stops.
+Use this scale. The `/security-review` command uses it to decide if a release stops.
 
 - **Critical**: an attacker or an external data source can run code, or a secret is exposed now.
 - **High**: a realistic path to code execution, secret exposure or XSS, with one extra condition.
