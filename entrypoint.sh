@@ -40,7 +40,11 @@ if [[ ${#SYNC_EXPRS[@]} -eq 0 ]]; then
   SCHEDULE="${DEFAULT_SCHEDULE}"
   IFS=';' read -ra SYNC_EXPRS <<< "${SCHEDULE}"
 fi
-printf '%s cd /app && bash fetch_docker.sh\n' "${SYNC_EXPRS[@]}" > /tmp/crontab
+# supercronic does not overlap runs of one job, but the initial sync below is
+# not a supercronic job. The shared lock stops a scheduled run that starts
+# during the initial sync. A run that cannot get the lock is skipped.
+SYNC_LOCK=/tmp/sync.lock
+printf '%s cd /app && flock -n '"${SYNC_LOCK}"' bash fetch_docker.sh\n' "${SYNC_EXPRS[@]}" > /tmp/crontab
 echo "${DIGEST_SCHEDULE} cd /app && bash send_digest.sh" >> /tmp/crontab
 echo "    Scheduled sync: ${SCHEDULE}"
 echo "    Scheduled digest: ${DIGEST_SCHEDULE}"
@@ -48,7 +52,7 @@ supercronic /tmp/crontab &
 
 # Run the pipeline once (site is already serving)
 echo "==> Running initial sync..."
-bash /app/fetch_docker.sh || echo "WARNING: Initial sync failed, serving stale plan"
+flock -n "${SYNC_LOCK}" bash /app/fetch_docker.sh || echo "WARNING: Initial sync failed, serving stale plan"
 
 echo "==> Ready."
 tail -f /dev/null
