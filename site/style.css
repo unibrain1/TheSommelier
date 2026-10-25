@@ -98,11 +98,21 @@ h1 em {
   font-weight: 500;
 }
 
+/* Right column: stats row with the last-updated line under it */
+.header-stats {
+  flex-shrink: 0;
+}
+
 .header-updated {
   font-size: 12px;
   color: var(--muted);
-  margin-top: 4px;
+  margin-top: 12px;
   font-style: italic;
+  text-align: right;
+}
+
+.header-updated:empty {
+  display: none;
 }
 
 /* Stats — right column */
@@ -779,6 +789,9 @@ footer strong { color: var(--text); font-weight: 600; }
     width: 80px;
   }
 
+  .header-stats { width: 100%; }
+  .header-updated { text-align: left; }
+
   .stats {
     padding-left: 0;
     border-left: none;
@@ -829,6 +842,8 @@ footer strong { color: var(--text); font-weight: 600; }
     align-items: flex-start;
     gap: 24px;
   }
+
+  .header-updated { text-align: left; }
 
   .stats {
     padding-left: 0;
