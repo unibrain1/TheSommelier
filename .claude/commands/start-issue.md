@@ -4,6 +4,8 @@ description: Start work on a GitHub issue within a milestone workflow
 
 # GitHub Issue Workflow Command
 
+Replace each `<name>` placeholder in this file with the real value before you use it.
+
 ## Available Agents
 
 | Agent | `subagent_type` | Model | Use When |
@@ -33,7 +35,7 @@ description: Start work on a GitHub issue within a milestone workflow
 ### Step 2: Fetch Issue Details
 
 ```bash
-gh issue view ISSUE_NUMBER --json number,title,body,milestone,labels
+gh issue view <issue-number> --json number,title,body,milestone,labels
 ```
 
 ### Step 3: Verify Milestone Branch
@@ -47,15 +49,15 @@ gh issue view ISSUE_NUMBER --json number,title,body,milestone,labels
 ### Step 4: Create Issue Branch
 
 ```bash
-git checkout -b BRANCH_NAME
-git push -u origin BRANCH_NAME
+git checkout -b <branch-name>
+git push -u origin <branch-name>
 ```
 
 ### Step 4.5: Update GitHub Issue
 
 ```bash
 gh label create "in progress" --color 0075CA --description "Work is actively underway" 2>/dev/null || true
-gh issue edit ISSUE_NUMBER --add-label "in progress" --add-assignee @me
+gh issue edit <issue-number> --add-label "in progress" --add-assignee @me
 ```
 
 ### Step 5: Launch Explore Agents (parallel)
@@ -109,11 +111,11 @@ Use EnterPlanMode. While planning:
 7. Fix any issues, then hand off:
 
 ```text
-Implementation complete for issue #ISSUE_NUMBER. Next steps:
+Implementation complete for issue #<issue-number>. Next steps:
 1. /simplify        — Review changed code (optional)
 2. /security-review — Audit changes before push
 3. Commit your changes manually (`git commit`) and push the branch.
-   Open a PR targeting `MILESTONE_BRANCH` and include "Closes #ISSUE_NUMBER" in the body.
+   Open a PR targeting `<milestone-branch>` and include "Closes #<issue-number>" in the body.
 4. /finish-issue    — Squash-merge, close the issue, return to milestone branch
 ```
 

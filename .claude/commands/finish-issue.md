@@ -2,9 +2,11 @@
 
 Squash-merge a PR, close the issue, delete the branch, and return to the milestone branch.
 
+Replace each `<name>` placeholder in this file with the real value before you use it.
+
 ## Arguments
 
-- `$ARGUMENTS` — the GitHub issue number (e.g., `16`). If omitted, infer from the current branch name (`bug/<number>-*`, `feature/<number>-*` or `issue/<number>-*`, see the branch-naming convention in `CLAUDE.md`).
+- `$ARGUMENTS` — the GitHub issue number (e.g., `16`). If omitted, infer from the current branch name (`bug/<issue-number>-*`, `feature/<issue-number>-*` or `issue/<issue-number>-*`, see the branch-naming convention in `CLAUDE.md`).
 
 ## Workflow
 
@@ -66,13 +68,13 @@ Squash-merge a PR, close the issue, delete the branch, and return to the milesto
 7. **List remaining milestone issues**:
 
    ```bash
-   gh issue list --milestone "<milestone title>" --state open --json number,title
+   gh issue list --milestone "<milestone-title>" --state open --json number,title
    ```
 
 8. **Report**:
    - Issue closed, PR merged, branch deleted, now on milestone branch
    - Remaining open issues
-   - If issues remain: "Run `/start-issue <number>` for the next issue"
+   - If issues remain: "Run `/start-issue <issue-number>` for the next issue"
    - If none remain: "All issues complete. Run `/finish-milestone <version>` to create the milestone PR"
 
 ## Important

@@ -4,6 +4,8 @@ Squash merge a milestone PR into main, tag the release, and publish a GitHub rel
 
 Picks up where `/finish-milestone` left off — after the milestone PR has been created and reviewed.
 
+Replace each `<name>` placeholder in this file with the real value before you use it.
+
 ## Arguments
 
 - `$ARGUMENTS` — (optional) the milestone version number (e.g., `v1.2.0`). If omitted, auto-detect from the open `milestone/*` → `main` PR.
@@ -21,7 +23,7 @@ Picks up where `/finish-milestone` left off — after the milestone PR has been 
 2. **Verify preconditions**:
 
    ```bash
-   gh pr view <number> --json mergeable,mergeStateStatus
+   gh pr view <pr-number> --json mergeable,mergeStateStatus
    git status --porcelain
    ```
 
@@ -38,14 +40,14 @@ Picks up where `/finish-milestone` left off — after the milestone PR has been 
    ```bash
    git checkout main
    git pull origin main
-   gh pr merge <number> --squash --delete-branch
+   gh pr merge <pr-number> --squash --delete-branch
    git pull origin main
    ```
 
 5. **Tag**:
 
    ```bash
-   git tag -a <version> -m "<version> — <milestone title>"
+   git tag -a <version> -m "<version> — <milestone-title>"
    git push origin main --tags
    ```
 
@@ -58,14 +60,14 @@ Picks up where `/finish-milestone` left off — after the milestone PR has been 
 7. **Create GitHub release**:
 
    ```bash
-   gh issue list --milestone "<full milestone title>" --state closed --json number,title
-   gh release create <version> --title "<version> — <milestone title>" --generate-notes
+   gh issue list --milestone "<milestone-title>" --state closed --json number,title
+   gh release create <version> --title "<version> — <milestone-title>" --generate-notes
    ```
 
 8. **Close the GitHub milestone**:
 
    ```bash
-   gh api repos/{owner}/{repo}/milestones/<milestone_number> -X PATCH -f state=closed
+   gh api repos/{owner}/{repo}/milestones/<milestone-number> -X PATCH -f state=closed
    ```
 
 9. **Output**:

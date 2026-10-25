@@ -2,6 +2,8 @@
 
 Begin work on a milestone by creating a milestone branch from main.
 
+Replace each `<name>` placeholder in this file with the real value before you use it.
+
 ## Arguments
 
 - `$ARGUMENTS` — the milestone version number (e.g., `v1.2.0`)
@@ -36,7 +38,7 @@ Begin work on a milestone by creating a milestone branch from main.
 4. **List the milestone's open issues**:
 
    ```bash
-   gh issue list --milestone "<full milestone title>" --state open --json number,title,labels,body
+   gh issue list --milestone "<milestone-title>" --state open --json number,title,labels,body
    ```
 
 5. **Recommend an issue order** based on:
@@ -50,4 +52,4 @@ Begin work on a milestone by creating a milestone branch from main.
 6. **Output**:
    - The milestone branch name
    - The recommended issue order
-   - "Use `/start-issue <number>` to begin work on the first issue"
+   - "Use `/start-issue <issue-number>` to begin work on the first issue"

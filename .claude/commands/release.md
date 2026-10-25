@@ -6,6 +6,8 @@ description: Automated release workflow with version analysis, release notes gen
 
 When the user runs `/release`, execute this comprehensive release workflow:
 
+Replace each `<name>` placeholder in this file with the real value before you use it.
+
 ## Phase 1: Pre-Flight Checks & Analysis
 
 1. **Verify Prerequisites**
@@ -16,15 +18,15 @@ When the user runs `/release`, execute this comprehensive release workflow:
 
 2. **Get Current State**
    - Get last release tag: `git describe --tags --abbrev=0`
-   - Count commits since last release: `git rev-list --count [last_tag]..HEAD`
+   - Count commits since last release: `git rev-list --count <last-tag>..HEAD`
 
 3. **Analyze Commits**
    - Breaking changes: grep for "BREAKING" or "breaking"
    - Features: grep for `^[a-f0-9]+ (feat|feature):`
    - Fixes: grep for `^[a-f0-9]+ (fix|hotfix|bug):`
-   - Get changed files: `git diff --name-only [last_tag]..HEAD`
+   - Get changed files: `git diff --name-only <last-tag>..HEAD`
    - Get resolved issues: extract #NNN from commits
-   - Get merged PRs: `gh pr list --state merged --search "merged:>[last_release_date]"`
+   - Get merged PRs: `gh pr list --state merged --search "<merged-filter>"`. Set `<merged-filter>` to `merged:>` followed by the last release date, for example `merged:>2026-01-31`.
 
 4. **Security Review**
    - If more than 50 changed files, warn and offer to skip
@@ -107,9 +109,9 @@ When the user runs `/release`, execute this comprehensive release workflow:
 
    ```bash
    git commit --allow-empty -m "$(cat <<'EOF'
-   Release: v[VERSION]
+   Release: v<version>
 
-   [Brief summary from release notes]
+   <brief-summary>
 
    🤖 Generated with Claude Code (https://claude.com/claude-code)
 
@@ -123,9 +125,9 @@ When the user runs `/release`, execute this comprehensive release workflow:
 2. **Create Annotated Tag**
 
    ```bash
-   git tag -a v[VERSION] -m "Release v[VERSION]: [Brief description]
+   git tag -a v<version> -m "Release v<version>: <brief-description>
 
-   [Key highlights from release notes]"
+   <key-highlights>"
    ```
 
 3. **Confirm Push**
@@ -133,7 +135,7 @@ When the user runs `/release`, execute this comprehensive release workflow:
    Show summary:
    ```text
    Ready to push:
-   - Tag: v[VERSION]
+   - Tag: v<version>
    - Destination: origin/main
    ```
 
@@ -142,7 +144,7 @@ When the user runs `/release`, execute this comprehensive release workflow:
 4. **Push to Origin**
    ```bash
    git push origin main
-   git push origin v[VERSION]
+   git push origin v<version>
    ```
 
 5. **Create GitHub Release**
@@ -152,8 +154,8 @@ When the user runs `/release`, execute this comprehensive release workflow:
    auto-generated commit summary.
 
    ```bash
-   gh release create v[VERSION] \
-     --title "The Sommelier v[VERSION]" \
+   gh release create v<version> \
+     --title "The Sommelier v<version>" \
      --notes-file RELEASE_NOTES.md
    ```
 
@@ -161,7 +163,7 @@ When the user runs `/release`, execute this comprehensive release workflow:
 
    Show these steps to the user. Do not run them.
 
-   Release v[VERSION] created
+   Release v<version> created
 
    Deploy to docker02.
 
@@ -183,7 +185,7 @@ When the user runs `/release`, execute this comprehensive release workflow:
    docker compose down && docker compose up -d
    ```
 
-   GitHub Release: [URL]
+   GitHub Release: <release-url>
 
    If `.env.sample` changed, check `.env` on docker02. New variables may be required.
 
