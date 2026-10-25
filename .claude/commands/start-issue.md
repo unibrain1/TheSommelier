@@ -100,7 +100,10 @@ Use EnterPlanMode. While planning:
 1. Update issue with plan details.
 2. Launch parallel **software-developer** agents for independent files.
 3. Launch parallel post-implementation agents: **senior-test-engineer** (write + run tests), **technical-documentation-writer** (update docs).
-4. Validate: `python3 -m pytest tests/ -v` + `mcp__ide__getDiagnostics`
+4. Validate:
+   - Run `python3 -m pytest tests/ -v`.
+   - Run `pre-commit run --all-files`. It runs `ruff`, `ruff format` and `pyright` with the pinned versions. The `pyright` command is not on the shell PATH, so do not run it directly.
+   - If the `mcp__ide__getDiagnostics` tool is available, also run it.
 5. Run `/security-review` — address Critical/High findings before proceeding.
 6. Launch **senior-architect** for final review: pipeline order, JSON contracts, shell safety, test coverage.
 7. Fix any issues, then hand off:
