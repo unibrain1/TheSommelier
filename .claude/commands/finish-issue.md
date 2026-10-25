@@ -12,10 +12,10 @@ Squash-merge a PR, close the issue, delete the branch, and return to the milesto
 
    Run `git branch --show-current`. Keep the output as `<issue-branch>` for step 6.
 
-   Set `<issue-number>` to `$ARGUMENTS`. If there is no argument, extract the number from `<issue-branch>`:
+   Set `<issue-number>` to `$ARGUMENTS`. If there is no argument, extract the number from the current branch name:
 
    ```bash
-   echo "<issue-branch>" | sed -nE 's#^(bug|feature|issue)/([0-9]+)-.*#\2#p'
+   git branch --show-current | sed -nE 's#^(bug|feature|issue)/([0-9]+)-.*#\2#p'
    ```
 
    If the output is empty, stop and ask the user for the issue number.
@@ -23,7 +23,7 @@ Squash-merge a PR, close the issue, delete the branch, and return to the milesto
    Find the open PR:
 
    ```bash
-   gh pr list --head "<issue-branch>" --state open --json number,title,url,baseRefName
+   gh pr list --head '<issue-branch>' --state open --json number,title,url,baseRefName
    ```
 
    If no PR exists, stop and tell the user to run `/commit-push-pr` first.
@@ -60,7 +60,7 @@ Squash-merge a PR, close the issue, delete the branch, and return to the milesto
    `gh pr merge --delete-branch` usually deletes the local branch. If the local branch still exists, try to delete it. After a squash merge, `git branch -d` can refuse. If it refuses, tell the user that `<issue-branch>` remains, and do not use `-D`:
 
    ```bash
-   git branch -d "<issue-branch>"
+   git branch -d '<issue-branch>'
    ```
 
 7. **List remaining milestone issues**:
