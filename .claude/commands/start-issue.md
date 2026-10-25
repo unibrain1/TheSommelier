@@ -42,7 +42,7 @@ gh issue view ISSUE_NUMBER --json number,title,body,milestone,labels
    - Zero milestone branches: stop, tell user to run `/start-milestone` first
    - Multiple: stop, ask which one
 2. **Ensure clean working tree** — run `git status --porcelain`. If any output appears, stop and ask the user to commit or stash before proceeding.
-3. **Branch naming** — `bug/` for bug label, `feature/` for enhancement, `issue/` for all others. Confirm name with user before creating.
+3. **Branch naming** — use the branch-naming convention in `CLAUDE.md` ("Important Conventions"). Confirm name with user before creating.
 
 ### Step 4: Create Issue Branch
 
