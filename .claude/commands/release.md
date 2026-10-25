@@ -51,7 +51,7 @@ When the user runs `/release`, execute this comprehensive release workflow:
 
 ## Phase 2: Generate Release Notes
 
-**Use the Task tool to analyze changes and generate comprehensive release notes:**
+**Use the Agent tool to analyze changes and generate comprehensive release notes:**
 
 1. **Analyze Repository Changes**
    - Read recent commits and their full messages
