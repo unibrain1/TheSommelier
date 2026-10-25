@@ -34,7 +34,7 @@ docker logs the-sommelier --tail 100
 - The container name is `the-sommelier`.
 - It runs as non-root. The UID and GID are configurable in compose.
 - It uses supercronic.
-- Set the sync schedule with the `SYNC_SCHEDULE` env var. The default is `0 2 * * *`.
+- Set the sync schedule with the `SYNC_SCHEDULE` env var. It accepts one or more cron expressions, separated by `;`. The default is `*/30 6-21 * * *;0 22 * * *` (every 30 minutes, 06:00 to 22:00 Pacific).
 - The container runs `git pull` on startup and before each pipeline run.
 - `docker compose restart` does NOT re-run the entrypoint. Use `down/up` instead.
 
