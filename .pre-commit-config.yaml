@@ -34,7 +34,13 @@ repos:
         args: ['-e', 'SC1091']  # Don't warn about not following sourced files
 
   # Dockerfile linting
-  - repo: https://github.com/hadolint/hadolint
-    rev: v2.12.0
+  # Local hook: the upstream hook runs the untagged (latest) image, so a new
+  # hadolint release could fail this hook without a repo change. Bump the tag
+  # and the digest by hand.
+  - repo: local
     hooks:
       - id: hadolint-docker
+        name: Lint Dockerfiles
+        language: docker_image
+        types: [dockerfile]
+        entry: ghcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d hadolint
