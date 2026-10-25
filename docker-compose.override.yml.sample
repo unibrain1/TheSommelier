@@ -39,8 +39,7 @@ services:
       - 192.0.2.10
       - 192.0.2.11
       - 8.8.8.8
-    networks:
-      - traefik_proxy
+    # run-now needs no reverse proxy network, because it serves no requests.
 
 networks:
   traefik_proxy:

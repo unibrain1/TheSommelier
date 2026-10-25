@@ -288,6 +288,8 @@ services:
       - CT_PASSWORD=your_cellartracker_password
 ```
 
+The override then holds your credentials in plain text. Set its mode to 600 (`chmod 600 docker-compose.override.yml`).
+
 And make the same `pipeline.sh` change as Option 1.
 
 ### Option 3: Other secret managers
