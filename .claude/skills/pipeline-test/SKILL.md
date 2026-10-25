@@ -85,7 +85,8 @@ Run the full pipeline end-to-end and validate all generated outputs.
 
 4. **Launch Playwright** to verify the site renders (if Playwright MCP is available):
 
-   - Navigate to `file:///Users/jimboone/Developer/Web/TheSommelier/site/index.html`
+   - Run `git rev-parse --show-toplevel`. Use the output as `<repo-root>`.
+   - Navigate to `file://<repo-root>/site/index.html`.
    - Take a snapshot and verify:
      - The plan table has rows
      - Tab navigation works (Plan, Pairings, Inventory)

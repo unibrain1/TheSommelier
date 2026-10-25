@@ -18,11 +18,16 @@ Tests require `pytest` (install via `pip install pytest`).
 
 ## Docker Deployment
 
-Production runs on **docker02**. Commands to restart, rebuild, or read logs are in the `deploy` skill (`.claude/skills/deploy/SKILL.md`).
+Production runs in Docker on the owner's homelab server. The commands to restart, rebuild, or read logs on that server are in a local `deploy` skill. That skill is not in git.
+
+`docker-compose.yml` is generic. Host settings (DNS, port, Traefik labels and network, HA SSH key) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. On the production server, the HomeLab Ansible deploy writes the override. It must never write the tracked `docker-compose.yml`, because a modified tracked file makes `git pull --ff-only` fail.
+
+The morning digest embeds `site/logo.png`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
 Self-updating: container does `git pull` on startup and before each pipeline run.
 Code changes pushed to GitHub are picked up automatically on next `down/up` or scheduled run.
 `docker compose restart` does NOT re-run the entrypoint — use `down/up` instead.
+`restart` keeps the stored container config. `down/up` and `run-now` read both compose files when they run.
 
 ## LLM vs Data Boundary
 
@@ -67,7 +72,7 @@ Implemented in `scripts/generate_plan.py`:
 
 ## Home Assistant Integration
 
-The Home Assistant push and its troubleshooting steps are in the `deploy` skill (`.claude/skills/deploy/SKILL.md`).
+The Home Assistant push and its troubleshooting steps are in the "Home Assistant" section of `README.md`. Steps for the owner's own server are in the local `deploy` skill, which is not in git.
 
 ## Deployment Gotchas
 
@@ -88,3 +93,4 @@ The Home Assistant push and its troubleshooting steps are in the `deploy` skill 
 - Community signals use RSS note data: recent score drift, note velocity, text-based window drift detection
 - Plan labels show best available critic score: WA → WS → BH → AG → JR → JS → JG → CT
 - `scoring.py` also owns `seasonal_score()` and red-subtype helpers (moved from `generate_plan.py` to avoid circular imports)
+- Branch naming for issue work: `bug/<n>-<slug>` for bug-labeled issues, `feature/<n>-<slug>` for enhancements, `issue/<n>-<slug>` for all other issues. Issue PRs target the active milestone branch, not `main`.

@@ -1,5 +1,6 @@
 # Secrets and personal config
 .env
+.env.secrets
 scripts/plan_config.py
 
 # Generated data
@@ -40,6 +41,27 @@ site/pairing_suggestions.json
 site/report.json
 site/thisweek.json
 site/today.json
+site/digest.html
+site/digest.json
 
 # Editor files
 *.code-workspace
+
+# Claude Code agent worktrees
+.claude/worktrees/
+
+# Personal workflow files (local only, not part of this project)
+.claude/skills/deploy/
+.claude/skills/sync/
+.claude/commands/start-milestone.md
+.claude/commands/start-issue.md
+.claude/commands/implement.md
+.claude/commands/finish-issue.md
+.claude/commands/finish-milestone.md
+.claude/commands/release-milestone.md
+.claude/commands/release.md
+.claude/commands/new-issue.md
+.claude/commands/simplify.md
+
+# Host-specific Docker Compose settings (see docker-compose.override.yml.sample)
+docker-compose.override.yml

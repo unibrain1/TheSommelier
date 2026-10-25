@@ -1,4 +1,6 @@
-# Customize: user, ports, dns, traefik labels for your environment
+# Generic file. Put host-specific settings (DNS, ports, reverse proxy labels,
+# networks, the Home Assistant SSH key) in docker-compose.override.yml.
+# See docker-compose.override.yml.sample.
 services:
   the-sommelier:
     build: .
@@ -11,21 +13,6 @@ services:
       - SYNC_SCHEDULE=*/30 6-21 * * *;0 22 * * *
     volumes:
       - ./:/app
-      - ~/.ssh/id_ed25519_ha:/run/secrets/ha_ssh_key:ro
-    dns:
-      - 10.10.1.10
-      - 10.10.1.11
-      - 8.8.8.8
-    labels:
-      traefik.enable: 'true'
-      traefik.http.routers.the-sommelier.entrypoints: https
-      traefik.http.routers.the-sommelier.rule: Host(`the-sommelier.unibrain.org`)
-      traefik.http.routers.the-sommelier.tls: 'true'
-      traefik.http.services.the-sommelier.loadbalancer.server.port: '8080'
-    networks:
-      - traefik_proxy
-    ports:
-      - "8089:8080"
     restart: unless-stopped
 
   run-now:
@@ -38,18 +25,7 @@ services:
       - TZ=America/Los_Angeles
     volumes:
       - ./:/app
-      - ~/.ssh/id_ed25519_ha:/run/secrets/ha_ssh_key:ro
-    dns:
-      - 10.10.1.10
-      - 10.10.1.11
-      - 8.8.8.8
     entrypoint: []
     command: ["bash", "/app/fetch_docker.sh"]
-    networks:
-      - traefik_proxy
     profiles:
       - run-now
-
-networks:
-  traefik_proxy:
-    external: true

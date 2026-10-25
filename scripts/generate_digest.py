@@ -15,6 +15,7 @@ Usage: generate_digest.py [--force]
 """
 
 import base64
+import html
 import json
 import os
 import sys
@@ -117,17 +118,24 @@ def _pairing_color(score: str) -> str:
     )
 
 
-def _logo_data_uri(site_dir: Path) -> str:
+def _logo_src(site_dir: Path) -> str:
+    """Return the logo as an inline data URI, a SITE_URL link, or empty."""
     logo_path = site_dir / "logo.png"
     if logo_path.exists():
         encoded = base64.b64encode(logo_path.read_bytes()).decode("ascii")
         return f"data:image/png;base64,{encoded}"
-    return "https://the-sommelier.unibrain.org/logo.png"
+    site_url = os.environ.get("SITE_URL", "").strip()
+    if site_url.startswith(("http://", "https://")):
+        return html.escape(site_url.rstrip("/") + "/logo.png", quote=True)
+    print(
+        "WARNING: site/logo.png not found and SITE_URL is not an http(s) URL. "
+        "The digest has no logo.",
+        file=sys.stderr,
+    )
+    return ""
 
 
-def format_digest_html(
-    digest: dict, logo_src: str = "https://the-sommelier.unibrain.org/logo.png"
-) -> str:
+def format_digest_html(digest: dict, logo_src: str = "") -> str:
     """Format the digest as a branded HTML email.
 
     Structure: tonight's dinner recommendation first (action item),
@@ -255,6 +263,12 @@ def format_digest_html(
   </table>
 </td></tr>"""
 
+    logo_html = (
+        f'<img src="{logo_src}" alt="The Sommelier" width="120" style="display:block;margin:0 auto 12px;">'
+        if logo_src
+        else ""
+    )
+
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f8f5f0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#3e3f3a;">
@@ -263,7 +277,7 @@ def format_digest_html(
 <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
 
 <tr><td style="background:linear-gradient(135deg,#3e3f3a 0%,#4a4b46 100%);padding:28px 32px;text-align:center;">
-  <img src="{logo_src}" alt="The Sommelier" width="120" style="display:block;margin:0 auto 12px;">
+  {logo_html}
   <div style="color:#c5bdb0;font-size:13px;margin-top:6px;letter-spacing:1px;text-transform:uppercase;">
     {date_display}
   </div>
@@ -298,8 +312,8 @@ def main() -> None:
         sys.exit(1)
 
     digest = build_digest(plan_path, pairing_path)
-    logo_src = _logo_data_uri(Path("site"))
-    html = format_digest_html(digest, logo_src=logo_src)
+    logo_src = _logo_src(Path("site"))
+    digest_html = format_digest_html(digest, logo_src=logo_src)
 
     json_path = Path("site/digest.json")
     html_path = Path("site/digest.html")
@@ -307,7 +321,7 @@ def main() -> None:
         json_path.write_text(
             json.dumps(digest, indent=2, ensure_ascii=False), encoding="utf-8"
         )
-        html_path.write_text(html, encoding="utf-8")
+        html_path.write_text(digest_html, encoding="utf-8")
     except OSError as e:
         # Clean up partial writes so send_digest.py doesn't find stale files
         json_path.unlink(missing_ok=True)
