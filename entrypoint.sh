@@ -23,10 +23,23 @@ nginx
 
 # Set up periodic sync with supercronic (runs as non-root)
 # SYNC_SCHEDULE can hold more than one cron expression, separated by ";".
+# Cron expressions contain spaces and commas, so neither can be the separator.
 # One expression cannot give "every 30 min from 06:00 to 22:00" with the 22:00 run included.
-SCHEDULE="${SYNC_SCHEDULE:-*/30 6-21 * * *;0 22 * * *}"
+DEFAULT_SCHEDULE="*/30 6-21 * * *;0 22 * * *"
+SCHEDULE="${SYNC_SCHEDULE:-${DEFAULT_SCHEDULE}}"
 DIGEST_SCHEDULE="${DIGEST_SEND_SCHEDULE:-0 8 * * *}"
-IFS=';' read -ra SYNC_EXPRS <<< "${SCHEDULE}"
+# A blank entry (for example "a;;b" or " ") gives a crontab line with no schedule,
+# and supercronic then rejects the whole file, digest line included.
+SYNC_EXPRS=()
+IFS=';' read -ra RAW_EXPRS <<< "${SCHEDULE}"
+for expr in "${RAW_EXPRS[@]}"; do
+  [[ -n "${expr// /}" ]] && SYNC_EXPRS+=("${expr}")
+done
+if [[ ${#SYNC_EXPRS[@]} -eq 0 ]]; then
+  echo "WARNING: SYNC_SCHEDULE has no cron expression — using default '${DEFAULT_SCHEDULE}'" >&2
+  SCHEDULE="${DEFAULT_SCHEDULE}"
+  IFS=';' read -ra SYNC_EXPRS <<< "${SCHEDULE}"
+fi
 printf '%s cd /app && bash fetch_docker.sh\n' "${SYNC_EXPRS[@]}" > /tmp/crontab
 echo "${DIGEST_SCHEDULE} cd /app && bash send_digest.sh" >> /tmp/crontab
 echo "    Scheduled sync: ${SCHEDULE}"
