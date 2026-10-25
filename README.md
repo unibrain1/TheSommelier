@@ -148,6 +148,14 @@ docker compose run --rm run-now
 Container: `the-sommelier`. Schedule configurable via `SYNC_SCHEDULE` env var (one or more cron expressions, separated by `;`). The default runs every 30 minutes from 6am to 10pm Pacific, so CellarTracker and Paprika changes show up within 30 minutes.
 Runs as non-root (configure `user` in docker-compose.yml to match your host UID/GID).
 
+`docker-compose.yml` is generic. It publishes no port and mounts no Home Assistant key. Put the settings for your host in `docker-compose.override.yml`, which git ignores. Docker Compose reads it automatically when you do not use `-f`. To start, copy the sample:
+
+```bash
+cp docker-compose.override.yml.sample docker-compose.override.yml
+```
+
+Then replace the placeholders: DNS servers, the reverse proxy host name, the published port and the SSH key path. Compose adds `dns` and `ports` to the lists in the base file, so set them in the override only.
+
 ## Home Assistant
 
 Each pipeline run can push `thisweek.json` and `today.json` to Home Assistant. The pipeline copies each file by SSH (`sudo tee`) to `/config/www/` on the Home Assistant host.
@@ -155,7 +163,7 @@ Each pipeline run can push `thisweek.json` and `today.json` to Home Assistant. T
 The push runs only when both of these are true:
 
 - `HA_SSH_TARGET` is set in `.env` (format: `user@host`).
-- An SSH key is mounted into the container at `/run/secrets/ha_ssh_key`.
+- An SSH key is mounted into the container at `/run/secrets/ha_ssh_key`. Add this mount in `docker-compose.override.yml` (see the sample file).
 
 If either one is missing, the log shows "Skipping Home Assistant push" and the pipeline continues.
 
@@ -268,11 +276,19 @@ CT_PASSWORD="${CT_PASSWORD}"
 Set credentials as environment variables in your shell or Docker compose:
 
 ```yaml
-# docker-compose.yml
-environment:
-  - CT_USERNAME=your_cellartracker_username
-  - CT_PASSWORD=your_cellartracker_password
+# docker-compose.override.yml (git ignores this file)
+services:
+  the-sommelier:
+    environment:
+      - CT_USERNAME=your_cellartracker_username
+      - CT_PASSWORD=your_cellartracker_password
+  run-now:
+    environment:
+      - CT_USERNAME=your_cellartracker_username
+      - CT_PASSWORD=your_cellartracker_password
 ```
+
+The override then holds your credentials in plain text. Set its mode to 600 (`chmod 600 docker-compose.override.yml`).
 
 And make the same `pipeline.sh` change as Option 1.
 
