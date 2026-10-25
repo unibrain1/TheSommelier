@@ -15,7 +15,7 @@ The generator scripts define the JSON schema. Do not trust a list of keys from m
 | `pairing_suggestions.json` | `scripts/pairing.py` |
 | `report.json` | `scripts/compare.py` |
 
-To find the writer of a file, find the line that writes the file. Run `grep -rn "<file name>" scripts/ pipeline.sh` to get the candidate lines. Most matches are readers or docstrings. Ignore them. Check the writer list again if a script is new.
+To find the writer of a file, find the line that writes the file. Run `grep -rn "<file name>" scripts/ pipeline.sh` to get the candidate lines. Most matches are readers or docstrings. Ignore them. When a script is added, run the grep again and update this table. The site pages fetch only `plan.json` and `pairing_suggestions.json`. If a page starts to fetch another JSON file, add its writer to this table.
 
 Follow these steps:
 
