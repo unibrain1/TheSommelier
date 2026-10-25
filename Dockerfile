@@ -39,7 +39,8 @@ RUN sed -i 's/user www-data;/user ansible;/' /etc/nginx/nginx.conf \
 
 WORKDIR /app
 
-USER ansible
+# Numeric form of the ansible user created above, so the host can resolve it (DL3066)
+USER 1000:1000
 
 EXPOSE 8080
 
