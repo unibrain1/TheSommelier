@@ -1,9 +1,14 @@
 """Tests for generate_digest.py — digest generation logic."""
 
+import base64
 import json
+from pathlib import Path
 
+import pytest
 
+import generate_digest
 from generate_digest import (
+    _logo_src,
     build_digest,
     find_meals_for_date,
     format_digest_html,
@@ -36,6 +41,16 @@ def _suggestion(date_str: str, meal: str, score: str = "good") -> dict:
         "date": date_str,
         "meal": meal,
         "pairing": {"score": score, "details": "test"},
+    }
+
+
+def _digest() -> dict:
+    return {
+        "date": "2026-04-18",
+        "date_display": "Friday, April 18, 2026",
+        "has_content": False,
+        "wine": None,
+        "pairings": [],
     }
 
 
@@ -247,3 +262,111 @@ class TestFormatDigestHtml:
         html = format_digest_html(digest)
         assert "The Sommelier" in html
         assert "Drink the right bottles at the right time" in html
+
+
+# ---------------------------------------------------------------------------
+# TestLogoSrc
+# ---------------------------------------------------------------------------
+
+
+class TestLogoSrc:
+    def test_logo_file_returns_data_uri(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SITE_URL", raising=False)
+        (tmp_path / "logo.png").write_bytes(b"png-bytes")
+        expected = "data:image/png;base64," + base64.b64encode(b"png-bytes").decode()
+        assert _logo_src(tmp_path) == expected
+
+    def test_logo_file_wins_over_site_url(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SITE_URL", "https://example.com")
+        (tmp_path / "logo.png").write_bytes(b"png-bytes")
+        assert _logo_src(tmp_path).startswith("data:image/png;base64,")
+
+    def test_site_url_used_when_no_file(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SITE_URL", "https://example.com")
+        assert _logo_src(tmp_path) == "https://example.com/logo.png"
+
+    def test_http_site_url_is_accepted(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SITE_URL", "http://example.test")
+        assert _logo_src(tmp_path) == "http://example.test/logo.png"
+
+    def test_trailing_slashes_are_stripped(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SITE_URL", "https://example.com///")
+        assert _logo_src(tmp_path) == "https://example.com/logo.png"
+
+    def test_site_url_is_escaped(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SITE_URL", 'https://example.com/a"b&c=d')
+        result = _logo_src(tmp_path)
+        assert '"' not in result
+        assert "&quot;" in result
+        assert "&amp;" in result
+
+    def test_unset_returns_empty_and_warns(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("SITE_URL", raising=False)
+        assert _logo_src(tmp_path) == ""
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.startswith("WARNING:")
+        assert len(captured.err.strip().splitlines()) == 1
+
+    def test_empty_site_url_returns_empty_and_warns(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setenv("SITE_URL", "")
+        assert _logo_src(tmp_path) == ""
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.startswith("WARNING:")
+
+    @pytest.mark.parametrize("value", ["javascript:alert(1)", "sommelier.example.com"])
+    def test_non_http_site_url_returns_empty_and_warns(
+        self, tmp_path, monkeypatch, capsys, value
+    ):
+        monkeypatch.setenv("SITE_URL", value)
+        assert _logo_src(tmp_path) == ""
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.startswith("WARNING:")
+
+    def test_site_url_whitespace_stripped(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SITE_URL", "  https://example.test/\n")
+        assert _logo_src(tmp_path) == "https://example.test/logo.png"
+
+    def test_no_warning_when_file_found(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("SITE_URL", raising=False)
+        (tmp_path / "logo.png").write_bytes(b"png-bytes")
+        _logo_src(tmp_path)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_no_warning_when_site_url_used(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("SITE_URL", "https://example.com")
+        _logo_src(tmp_path)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+
+
+# ---------------------------------------------------------------------------
+# TestFormatDigestHtmlLogo
+# ---------------------------------------------------------------------------
+
+
+class TestFormatDigestHtmlLogo:
+    def test_img_present_with_logo_src(self):
+        html = format_digest_html(_digest(), logo_src="https://example.com/logo.png")
+        assert '<img src="https://example.com/logo.png"' in html
+
+    def test_img_omitted_when_logo_src_empty(self):
+        assert "<img" not in format_digest_html(_digest(), logo_src="")
+
+    def test_img_omitted_with_default_argument(self):
+        assert "<img" not in format_digest_html(_digest())
+
+    def test_output_has_no_unibrain(self):
+        assert "unibrain" not in format_digest_html(_digest())
+
+
+class TestSourceGuard:
+    def test_module_source_has_no_unibrain(self):
+        assert "unibrain" not in Path(generate_digest.__file__).read_text()

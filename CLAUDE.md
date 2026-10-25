@@ -18,7 +18,9 @@ Tests require `pytest` (install via `pip install pytest`).
 
 ## Docker Deployment
 
-Production runs on **docker02**. Commands to restart, rebuild, or read logs are in the `deploy` skill (`.claude/skills/deploy/SKILL.md`).
+Production runs in Docker on the owner's homelab server. The commands to restart, rebuild, or read logs on that server are in a local `deploy` skill. That skill is not in git.
+
+The morning digest embeds `site/logo.png`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
 Self-updating: container does `git pull` on startup and before each pipeline run.
 Code changes pushed to GitHub are picked up automatically on next `down/up` or scheduled run.
@@ -67,7 +69,7 @@ Implemented in `scripts/generate_plan.py`:
 
 ## Home Assistant Integration
 
-The Home Assistant push and its troubleshooting steps are in the `deploy` skill (`.claude/skills/deploy/SKILL.md`).
+The Home Assistant push and its troubleshooting steps are in the "Home Assistant" section of `README.md`. Steps for the owner's own server are in the local `deploy` skill, which is not in git.
 
 ## Deployment Gotchas
 
