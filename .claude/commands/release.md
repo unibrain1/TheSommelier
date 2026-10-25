@@ -159,30 +159,33 @@ When the user runs `/release`, execute this comprehensive release workflow:
 
 6. **Provide Deployment Instructions**
 
-   ```text
-   ═══════════════════════════════════════════════════════
-   Release v[VERSION] Created Successfully!
-   ═══════════════════════════════════════════════════════
+   Show these steps to the user. Do not run them.
 
-   Deploy to docker02:
+   Release v[VERSION] created
 
-   [If Dockerfile changed:]
-     ssh docker02
-     cd /home/ansible/container/the-sommelier
-     docker compose up --build -d
+   Deploy to docker02.
 
-   [Otherwise — code/script changes only:]
-     The container will self-update on the next scheduled run (2am).
-     To deploy immediately:
-     ssh docker02
-     cd /home/ansible/container/the-sommelier
-     docker compose down && docker compose up -d
+   If the Dockerfile changed, rebuild the container:
+
+   ```bash
+   ssh docker02
+   cd /home/ansible/container/the-sommelier
+   docker compose up --build -d
+   ```
+
+   Otherwise (code or script changes only), the container updates itself
+   on the next scheduled run. Runs happen every 30 minutes from 06:00 to
+   22:00 Pacific. To deploy now:
+
+   ```bash
+   ssh docker02
+   cd /home/ansible/container/the-sommelier
+   docker compose down && docker compose up -d
+   ```
 
    GitHub Release: [URL]
 
-   [If .env.sample changed:]
-   ⚠️  Check .env on docker02 — new variables may be required.
-   ```
+   If `.env.sample` changed, check `.env` on docker02. New variables may be required.
 
 ## Error Handling
 
