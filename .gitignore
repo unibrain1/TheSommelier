@@ -43,3 +43,6 @@ site/today.json
 
 # Editor files
 *.code-workspace
+
+# Claude Code agent worktrees
+.claude/worktrees/
