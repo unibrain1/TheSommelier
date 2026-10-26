@@ -25,6 +25,7 @@ Production runs in Docker on the owner's homelab server. The commands to restart
 The morning digest embeds `site/logo.png`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
 Self-updating: container does `git pull` on startup and before each pipeline run.
+If the startup pull changes `entrypoint.sh`, the entrypoint starts itself again, so one `down/up` is enough. `pipeline.sh` pulls while it runs, so a change to `pipeline.sh` takes effect on the next run.
 Code changes pushed to GitHub are picked up automatically on next `down/up` or scheduled run.
 `docker compose restart` does NOT re-run the entrypoint — use `down/up` instead.
 `restart` keeps the stored container config. `down/up` and `run-now` read both compose files when they run.

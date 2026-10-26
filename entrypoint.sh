@@ -4,9 +4,20 @@ set -euo pipefail
 echo "==> Starting The Sommelier..."
 
 # Self-update from git
-git config --global --add safe.directory /app
-echo "==> Pulling latest from git..."
-git -C /app pull --ff-only 2>&1 || echo "WARNING: git pull failed — running with current version"
+# Bash keeps reading the copy of this file that it opened at start. If the pull
+# changes this file, start again so that the new version runs. ENTRYPOINT_REEXEC
+# stops a second pull, so the restart cannot loop.
+if [[ -z "${ENTRYPOINT_REEXEC:-}" ]]; then
+  git config --global --add safe.directory /app
+  ENTRYPOINT_HASH=$(git -C /app hash-object /app/entrypoint.sh 2>/dev/null || echo "unknown")
+  echo "==> Pulling latest from git..."
+  git -C /app pull --ff-only 2>&1 || echo "WARNING: git pull failed — running with current version"
+  if [[ "$(git -C /app hash-object /app/entrypoint.sh 2>/dev/null || echo "changed")" != "${ENTRYPOINT_HASH}" ]]; then
+    echo "==> entrypoint.sh changed, starting it again..."
+    ENTRYPOINT_REEXEC=1 exec /app/entrypoint.sh "$@"
+  fi
+fi
+unset ENTRYPOINT_REEXEC
 
 # Install/update Python dependencies if requirements changed
 pip install --no-cache-dir --root-user-action=ignore -q -r /app/requirements.txt 2>&1 || true
