@@ -43,8 +43,11 @@ fi
 # supercronic does not overlap runs of one job, but the initial sync below is
 # not a supercronic job. The shared lock stops a scheduled run that starts
 # during the initial sync. A run that cannot get the lock is skipped.
+# -o keeps the lock out of child processes. Without it, the `op daemon` that
+# the first `op read` starts keeps the lock open after the run, and every
+# later run is skipped.
 SYNC_LOCK=/tmp/sync.lock
-printf '%s cd /app && flock -n '"${SYNC_LOCK}"' bash fetch_docker.sh\n' "${SYNC_EXPRS[@]}" > /tmp/crontab
+printf '%s cd /app && flock -n -o '"${SYNC_LOCK}"' bash fetch_docker.sh\n' "${SYNC_EXPRS[@]}" > /tmp/crontab
 echo "${DIGEST_SCHEDULE} cd /app && bash send_digest.sh" >> /tmp/crontab
 echo "    Scheduled sync: ${SCHEDULE}"
 echo "    Scheduled digest: ${DIGEST_SCHEDULE}"
@@ -52,7 +55,7 @@ supercronic /tmp/crontab &
 
 # Run the pipeline once (site is already serving)
 echo "==> Running initial sync..."
-flock -n "${SYNC_LOCK}" bash /app/fetch_docker.sh || echo "WARNING: Initial sync failed, serving stale plan"
+flock -n -o "${SYNC_LOCK}" bash /app/fetch_docker.sh || echo "WARNING: Initial sync failed, serving stale plan"
 
 echo "==> Ready."
 tail -f /dev/null
