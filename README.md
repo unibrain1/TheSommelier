@@ -174,6 +174,19 @@ Troubleshooting:
 - To make Home Assistant read the files now, go to Developer Tools → Actions and run `rest.reload`.
 - If the push fails, make sure that the public half of the mounted key is in `authorized_keys` on the Home Assistant host.
 
+## Healthchecks.io
+
+Each pipeline run pings Healthchecks.io at the end. A successful run pings the `the-sommelier` check. A failed run pings `/fail`. The ping runs only when `HEALTHCHECK_PING_KEY` is set in `.env`.
+
+The check schedule on Healthchecks.io must match `SYNC_SCHEDULE`. If it does not match, the check reports "down" when no run is due. For the default schedule, use these settings:
+
+- Schedule type: Cron
+- Expression: `*/30 6-21 * * *`
+- Time zone: `America/Los_Angeles`
+- Grace time: 45 minutes
+
+Healthchecks.io accepts only one cron expression. The 22:00 run sends one extra ping, which has no effect. If you change `SYNC_SCHEDULE`, change the check schedule in the same change.
+
 ## Menu Plan Setup
 
 The pipeline reads your meal plan from a Google Calendar via its secret .ics URL. You can populate the calendar manually or use a recipe manager like [Paprika](https://www.paprikaapp.com).
