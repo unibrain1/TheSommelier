@@ -8,7 +8,7 @@ backticks. The keys are in
 - test: `python3 -m pytest tests/ -v --tb=short`
 - lint: `pre-commit run --all-files`
 - plans: `plans`
-- release_notes: `docs/releases/v{version}.md`
+- release_notes: `docs/releases/{version}.md`
 - private_paths: `.env scripts/plan_config.py docker-compose.override.yml`
 - deploy: `Local deploy skill (.claude/skills/deploy, not in git)`
 - vault: `Projects/The Sommelier/The Sommelier.md`
