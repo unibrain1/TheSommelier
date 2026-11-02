@@ -229,6 +229,23 @@ class TestMain:
         send_digest.main()
         assert len(smtp.instances) == 1
 
+    def test_main_smtp_error_prints_class_and_code_only(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        set_creds(monkeypatch)
+
+        def fail_login(self, user, password):
+            raise smtplib.SMTPAuthenticationError(535, b"SECRET-canary-server-text")
+
+        monkeypatch.setattr(RecordingSMTP, "login", fail_login)
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "ERROR: Failed to send digest email (SMTPAuthenticationError 535)" in err
+        assert "SECRET-canary" not in err
+        assert not (digest_dirs[0] / "digest_last_sent.txt").exists()
+
     def test_main_missing_credentials_exits_1(
         self, digest_dirs, monkeypatch, smtp, capsys
     ):

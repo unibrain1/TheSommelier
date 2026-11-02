@@ -172,7 +172,13 @@ def main() -> None:
     try:
         refused = send_email(msg, smtp_settings)
     except (smtplib.SMTPException, OSError) as e:
-        print(f"ERROR: Failed to send digest email: {e}", file=sys.stderr)
+        # The error text can repeat server responses. The class and the SMTP
+        # code are enough to tell an auth problem from an outage.
+        code = f" {e.smtp_code}" if isinstance(e, smtplib.SMTPResponseException) else ""
+        print(
+            f"ERROR: Failed to send digest email ({type(e).__name__}{code})",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # The other recipients got the email, so a resend would duplicate it.
