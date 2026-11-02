@@ -18,93 +18,17 @@ from pathlib import Path
 import pytest
 
 from parse_inventory import KEEP_FIELDS, PRO_SCORE_FIELDS, parse_inventory
+from tests.helpers import ALL_FIELDS, ORIGINAL_FIELDS, build_inventory_tsv, write_tsv
+from tests.helpers import minimal_row as _minimal_row
 
 # ---------------------------------------------------------------------------
 # TSV helpers
 # ---------------------------------------------------------------------------
 
-# Minimal original 22-field header (fields present before issue #27 changes)
-ORIGINAL_FIELDS = [
-    "iWine",
-    "Vintage",
-    "Wine",
-    "Varietal",
-    "MasterVarietal",
-    "Type",
-    "Color",
-    "Category",
-    "Country",
-    "Region",
-    "SubRegion",
-    "Appellation",
-    "Producer",
-    "Designation",
-    "Vineyard",
-    "Location",
-    "Bin",
-    "Size",
-    "BeginConsume",
-    "EndConsume",
-    "CT",
-    "MY",
-]
-
-# Full header including all new fields from issue #27
-ALL_FIELDS = ORIGINAL_FIELDS + [
-    "WA",
-    "WS",
-    "BH",
-    "AG",
-    "JR",
-    "JS",
-    "JG",
-    "cNotes",
-    "Price",
-    "PurchaseDate",
-    "StoreName",
-    "Valuation",
-]
-
 
 def _write_tsv(tmp_path: Path, headers: list[str], rows: list[dict]) -> Path:
     """Write a TSV file with the given headers and row dicts, return its Path."""
-    tsv = tmp_path / "test_inventory.tsv"
-    with open(tsv, "w", encoding="latin-1") as f:
-        f.write("\t".join(headers) + "\n")
-        for row in rows:
-            f.write("\t".join(str(row.get(h, "")) for h in headers) + "\n")
-    return tsv
-
-
-def _minimal_row(overrides: dict | None = None) -> dict:
-    """Return a dict representing a single bottle with sensible defaults."""
-    base = {
-        "iWine": "100001",
-        "Vintage": "2018",
-        "Wine": "Chateau Test",
-        "Varietal": "Cabernet Sauvignon",
-        "MasterVarietal": "Cabernet Sauvignon",
-        "Type": "Red",
-        "Color": "Red",
-        "Category": "Wine",
-        "Country": "USA",
-        "Region": "Napa Valley",
-        "SubRegion": "",
-        "Appellation": "Napa Valley",
-        "Producer": "Test Estate",
-        "Designation": "",
-        "Vineyard": "",
-        "Location": "Cellar",
-        "Bin": "A1",
-        "Size": "750mL",
-        "BeginConsume": "2022",
-        "EndConsume": "2030",
-        "CT": "92",
-        "MY": "91",
-    }
-    if overrides:
-        base.update(overrides)
-    return base
+    return write_tsv(tmp_path / "test_inventory.tsv", headers, rows)
 
 
 # ---------------------------------------------------------------------------
@@ -492,3 +416,36 @@ class TestPurchaseDatePreserved:
         w = parse_inventory(tsv)[0]
         assert w["PurchaseDate"] == "2019"
         assert not isinstance(w["PurchaseDate"], int)
+
+
+# ---------------------------------------------------------------------------
+# TestDateRelativeFixture
+# ---------------------------------------------------------------------------
+
+
+class TestDateRelativeFixture:
+    """The shared inventory fixture parses to a known set of wines."""
+
+    def test_fixture_groups_six_bottles_into_five_wines(self, tmp_path):
+        wines = parse_inventory(build_inventory_tsv(tmp_path / "inv.tsv"))
+        by_id = {w["iWine"]: w["Quantity"] for w in wines}
+        assert by_id == {
+            "200001": 2,
+            "200002": 1,
+            "200003": 1,
+            "200004": 1,
+            "200005": 1,
+        }
+
+    def test_fixture_windows_follow_the_given_year(self, tmp_path):
+        from datetime import date
+
+        wines = parse_inventory(
+            build_inventory_tsv(tmp_path / "inv.tsv", date(2040, 3, 1))
+        )
+        barolo = next(w for w in wines if w["iWine"] == "200005")
+        assert (barolo["BeginConsume"], barolo["EndConsume"]) == (2048, 2060)
+
+    def test_fixture_has_mixed_types(self, tmp_path):
+        wines = parse_inventory(build_inventory_tsv(tmp_path / "inv.tsv"))
+        assert {w["Type"] for w in wines} == {"Red", "White", "Sparkling", "Rosé"}

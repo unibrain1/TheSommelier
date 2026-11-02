@@ -2,18 +2,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# In Docker, env vars come from docker-compose env_file.
-# Locally, source .env if it exists.
-if [[ -f .env ]]; then
-  set -a
-  source .env
-  set +a
-fi
-
+# In Docker, compose env_file is the only source of the settings.
 source pipeline.sh
 
 echo "==> Done."
-jq '.summary' data/report.json
+jq '.summary' "${DATA_DIR}/report.json"
 echo ""
 echo "Pairing summary:"
-jq '{total_meals, matched_weeks, sommelier_picks}' data/pairing_suggestions.json
+jq '{total_meals, matched_weeks, sommelier_picks}' "${DATA_DIR}/pairing_suggestions.json"

@@ -7,15 +7,19 @@ by iWine. Never overwrites — only adds new notes (deduped by iNote).
 
 Usage: fetch_community_notes.py [community_notes.json]
 Env:   CT_COMMUNITY_NOTES_RSS must be set to the RSS feed URL.
+       The default cache is $DATA_DIR/community_notes.json.
 """
 
 import json
 import re
 import sys
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
+
+import settings
 
 
 def sanitize_bbcode(text: str) -> str:
@@ -163,7 +167,10 @@ def fetch_community_notes(rss_url: str, cache_path: Path) -> None:
         with urllib.request.urlopen(req, timeout=30) as resp:
             xml_text = resp.read().decode("utf-8", errors="replace")
     except Exception as e:
-        print(f"ERROR: RSS fetch failed: {e}", file=sys.stderr)
+        # The error text can hold the URL, and the URL holds the CK token. The
+        # HTTP status is safe, and it tells a bad token (401) from an outage.
+        status = f" {e.code}" if isinstance(e, urllib.error.HTTPError) else ""
+        print(f"ERROR: RSS fetch failed ({type(e).__name__}{status})", file=sys.stderr)
         sys.exit(1)
 
     # Parse
@@ -195,9 +202,7 @@ def fetch_community_notes(rss_url: str, cache_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    import os
-
-    url = os.environ.get("CT_COMMUNITY_NOTES_RSS", "")
+    url = settings.community_notes_url()
     if not url:
         print(
             "ERROR: CT_COMMUNITY_NOTES_RSS environment variable not set",
@@ -206,6 +211,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     cache = (
-        Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/community_notes.json")
+        Path(sys.argv[1])
+        if len(sys.argv) > 1
+        else settings.data_dir() / "community_notes.json"
     )
     fetch_community_notes(url, cache)

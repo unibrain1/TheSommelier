@@ -110,9 +110,9 @@ For tips on writing meal plan entries that produce the best pairing suggestions,
 - Python 3.12+
 - A [CellarTracker](https://www.cellartracker.com) account
 - A Google Calendar with meal plans — see [Menu Plan Setup](#menu-plan-setup)
-- [1Password CLI](https://developer.1password.com/docs/cli/) (`op`) — optional, see [Alternative Credential Methods](#alternative-credential-methods)
+- [1Password CLI](https://developer.1password.com/docs/cli/) (`op`) — optional, only to run `op run` with secret references, see [Configuration](#configuration)
 - [Paprika](https://www.paprikaapp.com) — optional, syncs meal plans to Google Calendar
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude`) — optional, for tasting notes
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude`) — optional, for tasting notes. The notes run only when `CLAUDE_CODE_OAUTH_TOKEN` is set, also on a local run with a logged-in CLI
 
 ### Setup
 
@@ -120,7 +120,7 @@ For tips on writing meal plan entries that produce the best pairing suggestions,
 pip install -r requirements.txt
 cp .env.sample .env
 cp scripts/plan_config.py.sample scripts/plan_config.py
-# Edit .env with your credentials
+# Edit .env with your values (see Configuration)
 # Edit scripts/plan_config.py with your holidays and evolution tracks
 ```
 
@@ -176,7 +176,7 @@ Troubleshooting:
 
 ## Healthchecks.io
 
-Each pipeline run pings Healthchecks.io at the end. A successful run pings the `the-sommelier` check. A failed run pings `/fail`. The ping runs only when `HEALTHCHECK_PING_KEY` is set in `.env`.
+Each pipeline run pings Healthchecks.io at the end. A successful run pings the `the-sommelier` check. A failed run pings `/fail`. The ping runs only when `HEALTHCHECK_PING_KEY` is set and `HEALTHCHECK_ENABLED` is not set to `false` or to a value that is not valid. The ping goes to `<HEALTHCHECK_BASE_URL>/<HEALTHCHECK_PING_KEY>/<HEALTHCHECK_SLUG>`. `HEALTHCHECK_SLUG` defaults to `the-sommelier`. `HEALTHCHECK_BASE_URL` defaults to `https://hc-ping.com`.
 
 The check schedule on Healthchecks.io must match `SYNC_SCHEDULE`. If it does not match, the check reports "down" when no run is due. For the default schedule, use these settings:
 
@@ -252,62 +252,21 @@ EVOLUTION_TRACKS = [
 
 If an evolution track falls on the same week as a holiday (e.g., Laurène in November near Thanksgiving), the occasions merge — the card shows both.
 
-## Alternative Credential Methods
+## Configuration
 
-The default setup uses [1Password CLI](https://developer.1password.com/docs/cli/) to securely resolve CellarTracker credentials at runtime. If you don't use 1Password, you have several options.
+The pipeline reads all settings from environment variables. `.env.sample` lists every variable. Copy it to `.env` and set plain values.
 
-### Option 1: Plain text in .env (simplest)
+Three variables are required: `USERNAME`, `PASSWORD` and `GOOGLE_CALENDAR_ICS_URL`. If one is missing, empty, or starts with `op://`, the run stops with an error that names the variable.
 
-Replace the 1Password secret references in `.env` with your actual credentials:
+Each optional feature turns on when all its settings are present. Set `<FEATURE>_ENABLED=false` to turn it off. An empty or unknown flag value also turns it off and logs a warning. The features are the digest email, Claude tasting notes, community notes and the Healthchecks.io ping. Each run logs the state of each feature.
 
-```bash
-# Instead of:
-# USERNAME="op://vault/item/username"
-# PASSWORD="op://vault/item/password"
+Choose how the values reach the pipeline:
 
-# Use:
-CT_USERNAME=your_cellartracker_username
-CT_PASSWORD=your_cellartracker_password
-```
+- Plain values in `.env`: run `bash fetch.sh`. The script reads `.env` unless `USERNAME`, `PASSWORD` and `GOOGLE_CALENDAR_ICS_URL` are all already set.
+- 1Password references in `.env`: run `op run --env-file=.env -- bash fetch.sh`. `op run` replaces each `op://` value before the script starts.
+- Docker: compose passes the values with `env_file: .env`. `fetch_docker.sh` does not read `.env`.
 
-Then modify `pipeline.sh` — replace the `op read` lines:
-
-```bash
-# Replace:
-CT_USERNAME=$(op read "$USERNAME")
-CT_PASSWORD=$(op read "$PASSWORD")
-
-# With:
-CT_USERNAME="${CT_USERNAME}"
-CT_PASSWORD="${CT_PASSWORD}"
-```
-
-**Note:** Your credentials will be stored in plain text. Do not commit `.env` to git (it's already in `.gitignore`).
-
-### Option 2: Environment variables
-
-Set credentials as environment variables in your shell or Docker compose:
-
-```yaml
-# docker-compose.override.yml (git ignores this file)
-services:
-  the-sommelier:
-    environment:
-      - CT_USERNAME=your_cellartracker_username
-      - CT_PASSWORD=your_cellartracker_password
-  run-now:
-    environment:
-      - CT_USERNAME=your_cellartracker_username
-      - CT_PASSWORD=your_cellartracker_password
-```
-
-The override then holds your credentials in plain text. Set its mode to 600 (`chmod 600 docker-compose.override.yml`).
-
-And make the same `pipeline.sh` change as Option 1.
-
-### Option 3: Other secret managers
-
-Adapt the `op read` lines in `pipeline.sh` to use your preferred secret manager (Vault, AWS Secrets Manager, Bitwarden CLI, etc.).
+Do not commit `.env`. Git ignores it.
 
 ## Documentation
 
