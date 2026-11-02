@@ -12,6 +12,7 @@ import json
 import sys
 from pathlib import Path
 
+import settings
 from wine_utils import call_claude, extract_json
 
 ENRICHED_FIELDS = [
@@ -236,10 +237,14 @@ if __name__ == "__main__":
 
     menu_path = Path(sys.argv[1])
     cache_path = (
-        Path(sys.argv[2]) if len(sys.argv) > 2 else Path("data/menu_enriched.json")
+        Path(sys.argv[2])
+        if len(sys.argv) > 2
+        else settings.data_dir() / "menu_enriched.json"
     )
     output_path = (
-        Path(sys.argv[3]) if len(sys.argv) > 3 else Path("data/menu_enriched_full.json")
+        Path(sys.argv[3])
+        if len(sys.argv) > 3
+        else settings.data_dir() / "menu_enriched_full.json"
     )
 
     enrich_menu(menu_path, cache_path, output_path)

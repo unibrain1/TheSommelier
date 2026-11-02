@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Deterministic wine plan generator.
 
-Reads inventory.json and produces site/plan.json with allWeeks (52 entries),
-quarterInfo, and changelog.  A backup of the previous plan is saved to
-data/plan_previous.json before overwriting.
+Reads inventory.json and produces plan.json with allWeeks (52 entries),
+quarterInfo, and changelog.  Before it writes, it copies the live
+$SITE_DIR/plan.json to $DATA_DIR/plan_previous.json and compares the new plan
+with it for the changelog.
 
 Usage:
-    python3 scripts/generate_plan.py data/inventory.json site/plan.json
+    python3 scripts/generate_plan.py "$DATA_DIR/inventory.json" "$DATA_DIR/plan.json"
 """
 
 import json
@@ -20,6 +21,7 @@ from pathlib import Path
 if "TZ" in os.environ:
     time.tzset()
 
+import settings
 from plan_config import EVOLUTION_TRACKS, HOLIDAYS
 from scoring import composite_score
 from wine_utils import (
@@ -671,7 +673,7 @@ def schedule_evolution_tracks(
 
 def _load_community_notes() -> dict[str, list[dict]] | None:
     """Load community notes cache if available."""
-    cn_path = Path("data/community_notes.json")
+    cn_path = settings.data_dir() / "community_notes.json"
     if cn_path.exists() and cn_path.stat().st_size > 0:
         try:
             return json.loads(cn_path.read_text(encoding="utf-8"))
@@ -890,7 +892,7 @@ def main() -> None:
 
     inventory_path = Path(sys.argv[1])
     plan_path = Path(sys.argv[2])
-    previous_path = Path("data/plan_previous.json")
+    previous_path = settings.data_dir() / "plan_previous.json"
 
     if not inventory_path.exists():
         print(f"Error: inventory file not found: {inventory_path}", file=sys.stderr)
@@ -899,23 +901,29 @@ def main() -> None:
     inventory: list[dict] = json.loads(inventory_path.read_text(encoding="utf-8"))
 
     # Load previous plan for changelog diffing (from the live site plan)
-    live_plan_path = Path("site/plan.json")
+    live_plan_path = settings.site_dir() / "plan.json"
     old_weeks: list[dict] | None = None
     old_history: list[dict] = []
+    old_data = None
     if live_plan_path.exists():
         try:
             old_data = json.loads(live_plan_path.read_text(encoding="utf-8"))
             old_weeks = old_data.get("allWeeks")
             old_history = old_data.get("changelogHistory") or []
-            # Back up the live plan
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"Warning: could not read existing plan ({exc})", file=sys.stderr)
+    else:
+        print(f"Note: no live plan at {live_plan_path}, changelog history starts empty")
+    if old_data is not None:
+        try:
             previous_path.parent.mkdir(parents=True, exist_ok=True)
             previous_path.write_text(
                 json.dumps(old_data, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
             print(f"Previous plan backed up to {previous_path}")
-        except (json.JSONDecodeError, OSError) as exc:
-            print(f"Warning: could not read existing plan ({exc})", file=sys.stderr)
+        except OSError as exc:
+            print(f"Warning: could not back up plan ({exc})", file=sys.stderr)
 
     # Apply default drinking windows for wines missing CellarTracker data
     defaulted = apply_default_windows(inventory)

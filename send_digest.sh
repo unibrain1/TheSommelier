@@ -2,18 +2,18 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Source .env for 1Password references (may not exist in Docker)
-if [[ -f .env ]]; then
-  set -a
-  source .env
-  set +a
-fi
-
-# Resolve SMTP credentials from 1Password (skip for --dry-run)
-export SMTP_USERNAME SMTP_PASSWORD DIGEST_RECIPIENTS
-if [[ ! " $* " =~ " --dry-run " ]]; then
-  SMTP_USERNAME=$(op read "$SMTP_USERNAME") || { echo "ERROR: Failed to resolve SMTP username"; exit 1; }
-  SMTP_PASSWORD=$(op read "$SMTP_PASSWORD") || { echo "ERROR: Failed to resolve SMTP password"; exit 1; }
+# A run on the host uses the repo folders, as fetch.sh does. Docker creates
+# /.dockerenv. In the container, compose gives all settings, and a .env from
+# the mounted repo must not change the folders.
+if [[ ! -f /.dockerenv ]]; then
+  # Skip .env when the values are already in the environment (the 1Password
+  # CLI), so that the op:// references in .env do not replace them.
+  if [[ -f .env && -z "${SMTP_USERNAME:-}" ]]; then
+    set -a
+    source .env
+    set +a
+  fi
+  export DATA_DIR="${DATA_DIR:-$PWD/data}" SITE_DIR="${SITE_DIR:-$PWD/site}"
 fi
 
 python3 scripts/send_digest.py "$@"

@@ -103,11 +103,10 @@ def parse_inventory(tsv_path: str | Path) -> list[dict]:
 
 
 if __name__ == "__main__":
-    tsv = (
-        sys.argv[1]
-        if len(sys.argv) > 1
-        else str(Path(__file__).parent / "inventory.tsv")
-    )
+    if len(sys.argv) < 2:
+        print("Usage: parse_inventory.py <inventory.tsv>", file=sys.stderr)
+        sys.exit(2)
+    tsv = sys.argv[1]
     wines = parse_inventory(tsv)
     json.dump(wines, sys.stdout, indent=2, ensure_ascii=False)
     print()  # trailing newline

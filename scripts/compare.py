@@ -228,9 +228,11 @@ def compare(inventory: list[dict], plan: list[dict]) -> dict:
 
 
 if __name__ == "__main__":
-    base = Path(__file__).parent
-    inv_path = sys.argv[1] if len(sys.argv) > 1 else str(base / "inventory.json")
-    plan_path = sys.argv[2] if len(sys.argv) > 2 else str(base / "plan.json")
+    if len(sys.argv) < 3:
+        print("Usage: compare.py <inventory.json> <plan.json>", file=sys.stderr)
+        sys.exit(2)
+    inv_path = sys.argv[1]
+    plan_path = sys.argv[2]
 
     inventory = json.loads(Path(inv_path).read_text())
     plan_data = json.loads(Path(plan_path).read_text())

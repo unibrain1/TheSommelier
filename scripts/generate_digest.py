@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate a morning digest for tonight's wine and menu pairings.
 
-Reads site/plan.json and site/pairing_suggestions.json. Produces
-site/digest.json (structured) and site/digest.html (branded email).
+Reads plan.json and pairing_suggestions.json from the site folder
+(SITE_DIR). Produces digest.json (structured) and digest.html (branded
+email) in the same folder.
 
 Only generates content when there's a menu entry for today — this is
 a "go pull this wine" reminder, not a daily newsletter.
@@ -28,6 +29,7 @@ from zoneinfo import ZoneInfo
 if "TZ" in os.environ:
     time.tzset()
 
+import settings
 from wine_utils import find_current_week
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
@@ -118,17 +120,17 @@ def _pairing_color(score: str) -> str:
     )
 
 
-def _logo_src(site_dir: Path) -> str:
+def _logo_src(logo_dir: Path) -> str:
     """Return the logo as an inline data URI, a SITE_URL link, or empty."""
-    logo_path = site_dir / "logo.png"
+    logo_path = logo_dir / "logo.png"
     if logo_path.exists():
         encoded = base64.b64encode(logo_path.read_bytes()).decode("ascii")
         return f"data:image/png;base64,{encoded}"
-    site_url = os.environ.get("SITE_URL", "").strip()
+    site_url = settings.site_url()
     if site_url.startswith(("http://", "https://")):
         return html.escape(site_url.rstrip("/") + "/logo.png", quote=True)
     print(
-        "WARNING: site/logo.png not found and SITE_URL is not an http(s) URL. "
+        f"WARNING: {logo_path} not found and SITE_URL is not an http(s) URL. "
         "The digest has no logo.",
         file=sys.stderr,
     )
@@ -301,22 +303,24 @@ def format_digest_html(digest: dict, logo_src: str = "") -> str:
 def main() -> None:
     force = "--force" in sys.argv
 
-    plan_path = Path("site/plan.json")
-    pairing_path = Path("site/pairing_suggestions.json")
+    site_dir = settings.site_dir()
+    plan_path = site_dir / "plan.json"
+    pairing_path = site_dir / "pairing_suggestions.json"
 
     if not plan_path.exists():
-        print("ERROR: site/plan.json not found", file=sys.stderr)
+        print(f"ERROR: {plan_path} not found", file=sys.stderr)
         sys.exit(1)
     if not pairing_path.exists():
-        print("ERROR: site/pairing_suggestions.json not found", file=sys.stderr)
+        print(f"ERROR: {pairing_path} not found", file=sys.stderr)
         sys.exit(1)
 
     digest = build_digest(plan_path, pairing_path)
-    logo_src = _logo_src(Path("site"))
+    # logo.png is a static file of the code, not run output, so it is not in SITE_DIR.
+    logo_src = _logo_src(Path(__file__).resolve().parent.parent / "site")
     digest_html = format_digest_html(digest, logo_src=logo_src)
 
-    json_path = Path("site/digest.json")
-    html_path = Path("site/digest.html")
+    json_path = site_dir / "digest.json"
+    html_path = site_dir / "digest.html"
     try:
         json_path.write_text(
             json.dumps(digest, indent=2, ensure_ascii=False), encoding="utf-8"
