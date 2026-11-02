@@ -13,6 +13,7 @@ if [[ -f .env && ( -z "${USERNAME:-}" || -z "${PASSWORD:-}" || -z "${GOOGLE_CALE
 fi
 
 export DATA_DIR="${DATA_DIR:-$PWD/data}" SITE_DIR="${SITE_DIR:-$PWD/site}"
+export PLAN_CONFIG="${PLAN_CONFIG:-$PWD/config/plan.yaml}"
 
 source pipeline.sh
 

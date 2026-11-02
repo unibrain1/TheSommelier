@@ -1,0 +1,49 @@
+# Plan settings: holidays and evolution tracks.
+#
+# Copy this file to the PLAN_CONFIG path and change it for your cellar:
+#   - bash fetch.sh reads config/plan.yaml in the repo.
+#   - The container reads /config/plan.yaml. Until the /config volume
+#     exists (#112), docker-compose.yml sets /app/config/plan.yaml.
+# If the file is missing, the plan uses the five holidays below and no
+# evolution tracks. A field that is not valid stops the run with an error
+# that names the field.
+
+# Holiday anchors. The plan generator finds the nearest week to each date and
+# puts a special bottle in it. February 29 is valid.
+holidays:
+  - name: Thanksgiving
+    month: 11
+    day: 26
+  - name: Christmas
+    month: 12
+    day: 18
+  - name: New Year's Eve
+    month: 12
+    day: 28
+  - name: Valentine's Day
+    month: 2
+    day: 14
+  - name: 4th of July
+    month: 7
+    day: 4
+  # Add your own, for example:
+  # - name: Anniversary
+  #   month: 5
+  #   day: 28
+
+# Evolution tracks: open one bottle each year from a label to see how the wine
+# develops across vintages. The generator picks the most urgent vintage in its
+# drinking window and schedules it near the 15th of preferred_month.
+#
+#   label            display name of the track
+#   name_fragment    text to find in the wine names of the inventory
+#                    (case does not matter)
+#   season_months    [start, end] months to try when the preferred week is
+#                    taken. The start must not be after the end.
+#   preferred_month  month for the bottle
+#
+# evolution_tracks:
+#   - label: Laurène
+#     name_fragment: laurène
+#     season_months: [10, 11]
+#     preferred_month: 11

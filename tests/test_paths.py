@@ -42,15 +42,11 @@ def dirs(clean_env, tmp_path, monkeypatch):
 
 @pytest.fixture
 def generate_plan(clean_env):
-    """Load generate_plan with the sample plan_config.
+    """Load generate_plan with the sample plan.yaml.
 
-    The real scripts/plan_config.py is git-ignored and not in CI, and
-    test_diff_plans puts a mock in sys.modules. The sample works in both cases.
+    The real config/plan.yaml is git-ignored and not in CI.
     """
-    config = types.ModuleType("plan_config")
-    source = (SCRIPTS / "plan_config.py.sample").read_text(encoding="utf-8")
-    exec(compile(source, "plan_config.py.sample", "exec"), config.__dict__)
-    clean_env.setitem(sys.modules, "plan_config", config)
+    clean_env.setenv("PLAN_CONFIG", str(REPO / "config" / "plan.yaml.sample"))
     spec = importlib.util.spec_from_file_location(
         "generate_plan_paths_test", SCRIPTS / "generate_plan.py"
     )

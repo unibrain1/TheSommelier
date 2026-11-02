@@ -10,10 +10,11 @@ services:
       - .env
     environment:
       - TZ=America/Los_Angeles
-      # Keep the files in the repo checkout. #112 removes these two lines when
-      # it adds the /data volume.
+      # Keep the files in the repo checkout. #112 removes these three lines when
+      # it adds the /data and /config volumes.
       - DATA_DIR=/app/data
       - SITE_DIR=/app/site
+      - PLAN_CONFIG=/app/config/plan.yaml
       - SYNC_SCHEDULE=*/30 6-21 * * *;0 22 * * *
     volumes:
       - ./:/app
@@ -27,10 +28,11 @@ services:
       - .env
     environment:
       - TZ=America/Los_Angeles
-      # Keep the files in the repo checkout. #112 removes these two lines when
-      # it adds the /data volume.
+      # Keep the files in the repo checkout. #112 removes these three lines when
+      # it adds the /data and /config volumes.
       - DATA_DIR=/app/data
       - SITE_DIR=/app/site
+      - PLAN_CONFIG=/app/config/plan.yaml
     volumes:
       - ./:/app
     entrypoint: []

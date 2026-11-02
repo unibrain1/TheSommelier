@@ -181,12 +181,12 @@ def harness(tmp_path, server) -> Harness:
     shutil.copytree(
         REPO / "scripts",
         app / "scripts",
+        # A v3 plan_config.py of the owner can still be in scripts/.
         ignore=shutil.ignore_patterns("__pycache__", "plan_config.py"),
     )
-    # The sample, not the personal plan_config.py of the owner.
-    shutil.copy2(
-        REPO / "scripts" / "plan_config.py.sample", app / "scripts" / "plan_config.py"
-    )
+    # The sample, not the personal config/plan.yaml of the owner.
+    (app / "config").mkdir()
+    shutil.copy2(REPO / "config" / "plan.yaml.sample", app / "config" / "plan.yaml")
 
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
@@ -224,6 +224,7 @@ def harness(tmp_path, server) -> Harness:
         "GOOGLE_CALENDAR_ICS_URL": ICS_URL,
         "DATA_DIR": str(tmp_path / "run" / "data"),
         "SITE_DIR": str(tmp_path / "run" / "data" / "site"),
+        "PLAN_CONFIG": str(app / "config" / "plan.yaml"),
     }
     return Harness(tmp_path, app, fixtures, curl_log, path, server, env)
 
@@ -402,6 +403,33 @@ def test_fetch_sh_runs_locally(harness):
     assert (harness.app / "data" / "inventory.json").is_file()
     _assert_site_files(harness.app / "site")
     assert "inventory_total_bottles" in result.stdout
+
+
+def test_fetch_sh_reads_plan_yaml_of_the_repo(harness):
+    # A field that is not valid shows which file fetch.sh gave to the plan step.
+    (harness.app / "config" / "plan.yaml").write_text("holidays: 1\n")
+    (harness.app / ".env").write_text(
+        f"USERNAME='{FAKE_USER}'\n"
+        f"PASSWORD='{FAKE_PASSWORD}'\n"
+        f"GOOGLE_CALENDAR_ICS_URL='{ICS_URL}'\n"
+    )
+
+    result = harness.run(
+        "fetch.sh",
+        drop=(
+            "USERNAME",
+            "PASSWORD",
+            "GOOGLE_CALENDAR_ICS_URL",
+            "DATA_DIR",
+            "SITE_DIR",
+            "PLAN_CONFIG",
+        ),
+    )
+
+    assert result.returncode != 0, _output(result)
+    output = _output(result)
+    assert f"{harness.app / 'config' / 'plan.yaml'}: holidays: must be a list" in output
+    assert "Plan generation failed" in output
 
 
 def test_fetch_sh_does_not_override_env_with_dotenv(harness):
