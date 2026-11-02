@@ -10,8 +10,8 @@ rules forbid eval:
   settings.py enabled <feature>  Exit 0 when the feature is on, else 1.
   settings.py get <name>         Print one value (data_dir, site_dir).
 
-A bad argument exits 2. DATA_DIR defaults to /data, and SITE_DIR defaults to
-$DATA_DIR/site.
+A bad argument exits 2. DATA_DIR defaults to /data, SITE_DIR defaults to
+$DATA_DIR/site, and PLAN_CONFIG defaults to /config/plan.yaml.
 
 Each function reads os.environ when it is called, not at import, so tests can
 change the environment with monkeypatch.
@@ -29,6 +29,7 @@ REQUIRED = ("USERNAME", "PASSWORD", "GOOGLE_CALENDAR_ICS_URL")
 ANTHROPIC_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 DEFAULT_DATA_DIR = "/data"
+DEFAULT_PLAN_CONFIG = "/config/plan.yaml"
 DEFAULT_SMTP_HOST = "smtp.gmail.com"
 DEFAULT_SMTP_PORT = 587
 DEFAULT_HC_SLUG = "the-sommelier"
@@ -51,6 +52,7 @@ ALL_VARS: tuple[str, ...] = (
     *(v for flag, needed in FEATURES.values() for v in (flag, *needed)),
     "DATA_DIR",
     "SITE_DIR",
+    "PLAN_CONFIG",
     "SITE_URL",
     "SMTP_HOST",
     "SMTP_PORT",
@@ -69,7 +71,7 @@ _FALSE = {"false", "0", "no"}
 
 # Optional values that are not feature settings. An op:// value here would
 # become a wrong path, host or address, with no other message.
-_PATH_VARS = ("DATA_DIR", "SITE_DIR")
+_PATH_VARS = ("DATA_DIR", "SITE_DIR", "PLAN_CONFIG")
 _OTHER_VARS = ("SMTP_HOST", "SMTP_FROM", "SITE_URL")
 
 # The state classes of the plan. Callers test kind, not the reason text, so a
@@ -128,6 +130,10 @@ def data_dir() -> Path:
 def site_dir() -> Path:
     value = _env("SITE_DIR")
     return Path(value) if value else data_dir() / "site"
+
+
+def plan_config_path() -> Path:
+    return Path(_env("PLAN_CONFIG") or DEFAULT_PLAN_CONFIG)
 
 
 def required() -> list[str]:
@@ -287,7 +293,7 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
         f"ERROR: Required variable {n} is missing or not resolved" for n in required()
     ]
     errors += [
-        f"ERROR: {n} is not resolved. Set a folder path."
+        f"ERROR: {n} is not resolved. Set a path."
         for n in _PATH_VARS
         if _unresolved(_env(n))
     ]

@@ -43,8 +43,8 @@ Implemented in `scripts/generate_plan.py`:
 - Priority: past peak → expiring → peak window → entering window → long-agers (held)
 - Long-ager hold: BeginConsume > current_year + 2, or hold back 2 if 3+ bottles
 - Seasonal: sparkling/rosé/white for spring-summer, bold reds for fall-winter
-- Evolution tracks and holidays configured in `scripts/plan_config.py` (gitignored, personal data)
-- Sample at `scripts/plan_config.py.sample`
+- Evolution tracks and holidays come from a YAML file at `PLAN_CONFIG` (default `/config/plan.yaml`; `bash fetch.sh` uses `config/plan.yaml`, gitignored, personal data). `scripts/plan_file.py` loads and checks it. A missing file gives the default holidays. A field that is not valid stops the run.
+- Sample at `config/plan.yaml.sample`. `scripts/convert_plan_config.py` converts a v3 `plan_config.py` one time
 
 ## CellarTracker Data Sources
 
@@ -88,8 +88,8 @@ The Home Assistant push and its troubleshooting steps are in the "Home Assistant
 - Pairing scores: `"good"`, `"partial"`, `"poor"`, `"neutral"`
 - `pipeline.sh` has all shared logic; `fetch.sh` and `fetch_docker.sh` are thin wrappers
 - Plan is regenerated from scratch every pipeline run — no manual editing of `plan.json`
-- Plan staged to `$DATA_DIR/plan.json`, only published to `$SITE_DIR` when complete with notes. `DATA_DIR` defaults to `/data`. `SITE_DIR` defaults to `$DATA_DIR/site`. `bash fetch.sh` sets them to the `data/` and `site/` folders of the repo. `docker-compose.yml` sets `/app/data` and `/app/site` until #112.
-- `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid, and `<FEATURE>_ENABLED` is not set to false or to a value that is not valid. An `op://` value counts as not resolved.
+- Plan staged to `$DATA_DIR/plan.json`, only published to `$SITE_DIR` when complete with notes. `DATA_DIR` defaults to `/data`. `SITE_DIR` defaults to `$DATA_DIR/site`. `bash fetch.sh` sets them to the `data/` and `site/` folders of the repo. `docker-compose.yml` sets `/app/data`, `/app/site` and `PLAN_CONFIG=/app/config/plan.yaml` until #112.
+- `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR`, `PLAN_CONFIG` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid, and `<FEATURE>_ENABLED` is not set to false or to a value that is not valid. An `op://` value counts as not resolved.
 - Shared utilities in `scripts/wine_utils.py` — do not duplicate `urgency_score`, `normalize`, `TYPE_TO_BADGE`, or `CURRENT_YEAR` in individual scripts
 - Composite scoring in `scripts/scoring.py` — `composite_score()` combines: window position (50%), seasonal fit (25%), diversity (10%), CT quality (10%), community signals (5%). Lower score = schedule sooner.
 - Community signals use RSS note data: recent score drift, note velocity, text-based window drift detection

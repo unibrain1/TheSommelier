@@ -21,8 +21,8 @@ from pathlib import Path
 if "TZ" in os.environ:
     time.tzset()
 
+import plan_file
 import settings
-from plan_config import EVOLUTION_TRACKS, HOLIDAYS
 from scoring import composite_score
 from wine_utils import (
     CURRENT_YEAR,
@@ -287,6 +287,8 @@ def assign_holiday_anchors(
     reserved: dict[int, dict],  # week_index → wine
     scheduled_counts: dict[str, int],
     placed: list[dict | None] | None = None,
+    *,
+    holidays: list[tuple[str, int, int]],
 ) -> None:
     """For each holiday, find the nearest unoccupied week and reserve a bottle.
 
@@ -301,11 +303,11 @@ def assign_holiday_anchors(
     evolution_occasions: set[str] = set()
     for slot in reserved.values():
         occ = slot.get("occasion", "") or ""
-        for holiday_name, _, _ in HOLIDAYS:
+        for holiday_name, _, _ in holidays:
             if holiday_name.lower() in occ.lower():
                 evolution_occasions.add(holiday_name)
 
-    for holiday_name, month, day in HOLIDAYS:
+    for holiday_name, month, day in holidays:
         # Skip if an evolution track already anchored this holiday
         if holiday_name in evolution_occasions:
             continue
@@ -584,6 +586,9 @@ def schedule_evolution_tracks(
     candidates: list[dict],
     reserved: dict[int, dict],
     scheduled_counts: dict[str, int],
+    *,
+    evolution_tracks: list[dict],
+    holidays: list[tuple[str, int, int]],
 ) -> None:
     """Reserve one week per year per evolution track.
 
@@ -597,7 +602,7 @@ def schedule_evolution_tracks(
 
     for year_offset in (0, 1):
         calendar_year = plan_year1_calendar + year_offset
-        for track in EVOLUTION_TRACKS:
+        for track in evolution_tracks:
             preferred_month = track["preferred_month"]
             target = _evolution_target_date(preferred_month, calendar_year)
 
@@ -646,7 +651,7 @@ def schedule_evolution_tracks(
 
             # Determine occasion label — check if a holiday anchor is nearby
             nearby_holiday = None
-            for holiday_name, month, day in HOLIDAYS:
+            for holiday_name, month, day in holidays:
                 try:
                     h_target = date(week_dates[idx].year, month, day)
                 except ValueError:
@@ -685,7 +690,7 @@ def _load_community_notes() -> dict[str, list[dict]] | None:
     return None
 
 
-def generate_plan(inventory: list[dict]) -> dict:
+def generate_plan(inventory: list[dict], plan_config: plan_file.PlanConfig) -> dict:
     """Generate the full 52-week plan from inventory data."""
     today = date.today()
     start = monday_of_week(today)
@@ -704,7 +709,14 @@ def generate_plan(inventory: list[dict]) -> dict:
     placed: list[dict | None] = [None] * TOTAL_WEEKS
 
     # --- Phase 1: Reserve evolution tracks ---
-    schedule_evolution_tracks(week_dates, candidates, reserved, scheduled_counts)
+    schedule_evolution_tracks(
+        week_dates,
+        candidates,
+        reserved,
+        scheduled_counts,
+        evolution_tracks=plan_config.evolution_tracks,
+        holidays=plan_config.holidays,
+    )
 
     # Populate placed[] with evolution-track wines so holiday diversity scoring is accurate
     for idx, slot in reserved.items():
@@ -712,7 +724,12 @@ def generate_plan(inventory: list[dict]) -> dict:
 
     # --- Phase 2: Reserve holiday anchors ---
     assign_holiday_anchors(
-        week_dates, candidates, reserved, scheduled_counts, placed=placed
+        week_dates,
+        candidates,
+        reserved,
+        scheduled_counts,
+        placed=placed,
+        holidays=plan_config.holidays,
     )
 
     # Update placed[] with holiday anchor wines
@@ -898,6 +915,14 @@ def main() -> None:
         print(f"Error: inventory file not found: {inventory_path}", file=sys.stderr)
         sys.exit(1)
 
+    # Before any write, so a bad plan file leaves the live plan as it is.
+    plan_config_path = settings.plan_config_path()
+    try:
+        plan_config = plan_file.load(plan_config_path)
+    except plan_file.PlanConfigError as exc:
+        print(f"Error: {plan_config_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     inventory: list[dict] = json.loads(inventory_path.read_text(encoding="utf-8"))
 
     # Load previous plan for changelog diffing (from the live site plan)
@@ -931,7 +956,7 @@ def main() -> None:
         print(f"Applied default drinking windows to {defaulted} wine(s)")
 
     print(f"Generating plan from {len(inventory)} inventory wines…")
-    plan_data = generate_plan(inventory)
+    plan_data = generate_plan(inventory, plan_config)
 
     changelog = build_changelog(old_weeks, plan_data["allWeeks"])
 

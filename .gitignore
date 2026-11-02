@@ -2,6 +2,7 @@
 .env
 .env.secrets
 scripts/plan_config.py
+config/plan.yaml
 
 # Generated data
 data/

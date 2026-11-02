@@ -24,7 +24,7 @@ repos:
     rev: v1.1.400
     hooks:
       - id: pyright
-        additional_dependencies: ['icalendar>=6.0.0']
+        additional_dependencies: ['icalendar>=6.0.0', 'PyYAML>=6.0.3', 'types-PyYAML']
 
   # Shell script linting
   - repo: https://github.com/shellcheck-py/shellcheck-py

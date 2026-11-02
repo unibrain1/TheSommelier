@@ -119,9 +119,9 @@ For tips on writing meal plan entries that produce the best pairing suggestions,
 ```bash
 pip install -r requirements.txt
 cp .env.sample .env
-cp scripts/plan_config.py.sample scripts/plan_config.py
+cp config/plan.yaml.sample config/plan.yaml
 # Edit .env with your values (see Configuration)
-# Edit scripts/plan_config.py with your holidays and evolution tracks
+# Edit config/plan.yaml with your holidays and evolution tracks
 ```
 
 ### Run
@@ -216,39 +216,45 @@ You can also add meal events directly to any Google Calendar. Name each event af
 
 ## Plan Configuration
 
-Edit `scripts/plan_config.py` to customize the plan for your cellar. A sample is provided at `scripts/plan_config.py.sample`.
+The plan reads holidays and evolution tracks from a YAML file. `PLAN_CONFIG` sets the path. The default is `/config/plan.yaml`, and `bash fetch.sh` uses `config/plan.yaml` in the repo. Copy `config/plan.yaml.sample` to that path and change it for your cellar. Git ignores `config/plan.yaml`.
+
+If the file is missing, the plan uses the five holidays of the sample and no evolution tracks, and the run logs a note. If a field is not valid, the run stops with an error that names the field, for example `evolution_tracks[0].prefered_month: unknown field`.
 
 ### Holidays
 
-Anchor special bottles to dates that matter to you. The plan generator finds the nearest week and assigns a high-score bottle.
+Anchor special bottles to dates that matter to you. The plan generator finds the nearest week and assigns a high-score bottle. If the file has no `holidays` key, the plan uses the default holidays. `holidays: []` gives no holidays.
 
-```python
-HOLIDAYS = [
-    ("Thanksgiving", 11, 26),
-    ("Christmas", 12, 18),
-    ("New Year's Eve", 12, 28),
-    ("Valentine's Day", 2, 14),
-    ("4th of July", 7, 4),
-    ("Anniversary", 6, 15),       # your date
-    ("Birthday", 9, 22),          # your date
-]
+```yaml
+holidays:
+  - name: Thanksgiving
+    month: 11
+    day: 26
+  - name: Anniversary   # your date
+    month: 6
+    day: 15
 ```
 
 ### Evolution Tracks
 
 Track how a specific wine develops across vintages by opening one bottle per year. The generator picks the most urgent vintage within the drinking window and schedules it in your preferred month.
 
-```python
-EVOLUTION_TRACKS = [
-    {
-        "label": "Laurène",              # display name
-        "name_fragment": "laurène",       # matched against inventory wine names
-        "season_months": (10, 11),        # schedule in Oct–Nov
-        "preferred_month": 11,            # ideally November
-        "occasion_template": "{occasion} — Laurène evolution",
-    },
-]
+```yaml
+evolution_tracks:
+  - label: Laurène              # display name
+    name_fragment: laurène      # matched against inventory wine names
+    season_months: [10, 11]     # fallback months when the preferred week is taken; start must not be after end
+    preferred_month: 11         # ideally November
 ```
+
+### Upgrade from plan_config.py
+
+Before v4.0.0 the settings were in `scripts/plan_config.py`. Convert that file one time:
+
+```bash
+python3 scripts/convert_plan_config.py scripts/plan_config.py config/plan.yaml
+```
+
+The script drops `occasion_template`, which the plan generator never used. It does not write over a file that exists.
 
 If an evolution track falls on the same week as a holiday (e.g., Laurène in November near Thanksgiving), the occasions merge — the card shows both.
 
