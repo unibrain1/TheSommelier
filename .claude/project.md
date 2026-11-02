@@ -12,3 +12,5 @@ backticks. The keys are in
 - private_paths: `.env scripts/plan_config.py docker-compose.override.yml`
 - deploy: `Local deploy skill (.claude/skills/deploy, not in git)`
 - vault: `Projects/The Sommelier/The Sommelier.md`
+- milestone_checks: `scripts/check-release-notes.sh`
+- release_checks: `scripts/check-release-notes.sh`
