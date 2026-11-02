@@ -94,4 +94,25 @@ The Home Assistant push and its troubleshooting steps are in the "Home Assistant
 - Community signals use RSS note data: recent score drift, note velocity, text-based window drift detection
 - Plan labels show best available critic score: WA → WS → BH → AG → JR → JS → JG → CT
 - `scoring.py` also owns `seasonal_score()` and red-subtype helpers (moved from `generate_plan.py` to avoid circular imports)
-- Branch naming for issue work: `bug/<n>-<slug>` for bug-labeled issues, `feature/<n>-<slug>` for enhancements, `issue/<n>-<slug>` for all other issues. Issue PRs target the active milestone branch, not `main`.
+
+<!-- flow:begin rev 1 -->
+## Developer workflow (flow)
+
+Branches: `main` ← `milestone/vX.Y.Z` ← `issue/NNN-slug`. One PR for each
+issue, to the milestone branch. A hotfix branches from `main` (the
+`flow:hotfix` skill).
+
+```text
+/flow:plan-milestone → /flow:start-milestone
+  per issue: /flow:start-issue → /flow:execute-plan → /commit → /flow:review-pr
+             → /flow:commit-push-pr → /flow:address-pr-comments → /flow:finish-issue
+/flow:finish-milestone → /flow:review-milestone → /flow:release-milestone
+```
+
+Hand-offs: start the next command through the Skill tool only when both
+commands declare the same `model:`. Otherwise, tell the user to type it.
+At an issue or milestone boundary, recommend `/clear` first.
+
+Project facts for these commands are in `.claude/project.md`. The full
+method is in the `flow:workflow` skill.
+<!-- flow:end -->
