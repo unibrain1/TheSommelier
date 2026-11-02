@@ -13,6 +13,7 @@ SHELL_FILES = [
     "fetch_docker.sh",
     "entrypoint.sh",
 ]
+APP_PATH_IN_SHELL = re.compile(r"/app/(data|site)\b")
 FIXED_PATH_IN_SHELL = re.compile(r"""(^|[ "'=>(])(data|site)/""")
 
 # (file, string) -> reason. Each entry is one allowed constant.
@@ -101,5 +102,17 @@ def test_no_fixed_paths_in_shell():
         assert path.exists(), name
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if FIXED_PATH_IN_SHELL.search(line):
+                hits.append(f"{name}:{number}: {line.strip()}")
+    assert hits == []
+
+
+def test_no_app_data_or_app_site_in_shell():
+    """The container paths come from compose (DATA_DIR, SITE_DIR), not from scripts."""
+    hits = []
+    for name in SHELL_FILES:
+        path = REPO / name
+        assert path.exists(), name
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if APP_PATH_IN_SHELL.search(line):
                 hits.append(f"{name}:{number}: {line.strip()}")
     assert hits == []

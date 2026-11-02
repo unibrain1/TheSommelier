@@ -2,7 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# In Docker, compose env_file is the only source of the settings.
+# In Docker, compose gives all settings (env_file and environment:). Do not
+# read .env here.
 source pipeline.sh
 
 echo "==> Done."

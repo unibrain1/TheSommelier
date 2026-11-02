@@ -635,3 +635,63 @@ def test_enabled_exit_codes(name):
     assert disabled.returncode == 1
     for result in (on, off, disabled):
         assert "SECRET-canary" not in result.stdout + result.stderr
+
+
+# --- kind, op:// in lists and in optional values ---------------------------
+
+
+@pytest.mark.parametrize(
+    "flag_value, kind",
+    [("false", "disabled"), ("maybe", "bad_flag"), (None, "on")],
+)
+def test_kind_names_the_state_class(clean_env, flag_value, kind):
+    set_feature(clean_env, "digest")
+    if flag_value is not None:
+        clean_env.setenv("DIGEST_ENABLED", flag_value)
+    assert settings.feature("digest").kind == kind
+
+
+def test_kind_not_configured_and_incomplete(clean_env):
+    assert settings.feature("digest").kind == "not_configured"
+    set_feature(clean_env, "digest", skip=("SMTP_PASSWORD",))
+    assert settings.feature("digest").kind == "incomplete"
+
+
+def test_op_reference_in_recipient_list_turns_digest_off(clean_env):
+    set_feature(clean_env, "digest")
+    clean_env.setenv("DIGEST_RECIPIENTS", "a@example.com,op://vault/item/rcpt")
+    state = settings.feature("digest")
+    assert state.on is False
+    assert state.problems == ["DIGEST_RECIPIENTS"]
+    _, warnings, _ = settings.check_lines()
+    assert settings.OP_WARNING in warnings
+
+
+@pytest.mark.parametrize("var", ["SMTP_HOST", "SMTP_FROM"])
+def test_op_reference_in_smtp_option_turns_digest_off(clean_env, var):
+    set_feature(clean_env, "digest")
+    clean_env.setenv(var, "op://vault/item/field")
+    state = settings.feature("digest")
+    assert state.on is False
+    assert var in state.problems
+
+
+@pytest.mark.parametrize("var", ["DATA_DIR", "SITE_DIR"])
+def test_op_reference_in_path_is_error(var):
+    result = run_cli(["check"], {**REQUIRED_VALUES, var: "op://vault/item/path"})
+    assert result.returncode == 1
+    assert f"ERROR: {var} is not resolved" in result.stderr
+    assert "op://vault" not in result.stdout + result.stderr
+
+
+def test_op_reference_in_site_url_is_warning(clean_env):
+    clean_env.setenv("SITE_URL", "op://vault/item/url")
+    _, warnings, errors = settings.check_lines()
+    assert "WARNING: SITE_URL is not resolved. It is not used." in warnings
+    assert settings.OP_WARNING in warnings
+    assert not any("SITE_URL" in e for e in errors)
+
+
+def test_smtp_port_is_none_when_not_valid(clean_env):
+    clean_env.setenv("SMTP_PORT", "abc")
+    assert settings.smtp().port is None

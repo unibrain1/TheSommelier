@@ -333,6 +333,20 @@ def test_pipeline_failure_sends_fail_ping(harness):
     assert KEY_CANARY not in result.stderr
 
 
+def test_pipeline_settings_failure_sends_fail_ping(harness):
+    """A run that stops at the settings check still sends the fail ping."""
+    result = harness.run(
+        "fetch_docker.sh", extra=_enable_healthcheck(harness), drop=("PASSWORD",)
+    )
+
+    assert result.returncode != 0, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    # No fetch ran.
+    assert harness.curl_urls() == []
+    assert KEY_CANARY not in result.stdout
+    assert KEY_CANARY not in result.stderr
+
+
 def test_pipeline_success_sends_ping(harness):
     result = harness.run("fetch_docker.sh", extra=_enable_healthcheck(harness))
 
@@ -509,6 +523,58 @@ def test_send_digest_sh_with_dotenv_reads_site_folder_of_the_app(harness):
     )
     assert missing.returncode == 1, _output(missing)
     assert str(site / "digest.json") in missing.stderr
+
+
+def test_send_digest_sh_does_not_override_env_with_dotenv(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    (site / "digest.html").write_text("<html>digest</html>", encoding="utf-8")
+    (site / "digest.json").write_text(
+        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
+        encoding="utf-8",
+    )
+    (harness.app / ".env").write_text(
+        "SMTP_USERNAME='fromfile@example.com'\n"
+        "SMTP_PASSWORD='fromfile-pw'\n"
+        "DIGEST_RECIPIENTS='file@example.com'\n"
+    )
+
+    result = harness.run(
+        "send_digest.sh",
+        args=("--dry-run", "--force"),
+        extra={
+            "SMTP_USERNAME": "fromenv@example.com",
+            "SMTP_PASSWORD": "fromenv-pw",
+            "DIGEST_RECIPIENTS": "env@example.com",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "From: fromenv@example.com" in result.stdout
+    assert "To: env@example.com" in result.stdout
+    assert "fromfile" not in result.stdout + result.stderr
+
+
+def test_send_digest_sh_without_dotenv_uses_repo_site_folder(harness):
+    """On the host, fetch.sh writes to the repo folders with or without .env."""
+    site = harness.app / "site"
+    site.mkdir(exist_ok=True)
+    (site / "digest.html").write_text("<html>digest</html>", encoding="utf-8")
+    (site / "digest.json").write_text(
+        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
+        encoding="utf-8",
+    )
+    assert not (harness.app / ".env").exists()
+
+    result = harness.run(
+        "send_digest.sh",
+        args=("--dry-run", "--force"),
+        extra={"SMTP_USERNAME": "fromenv@example.com"},
+        drop=("DATA_DIR", "SITE_DIR"),
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "=== DRY RUN ===" in result.stdout
 
 
 def test_pipeline_failure_after_success_ping_sends_no_fail_ping(harness):

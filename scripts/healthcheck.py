@@ -4,8 +4,8 @@
 Usage: healthcheck.py success|fail <message>
 
 The URL holds the ping key, so it stays out of command arguments (ps) and out
-of every message. urllib errors can hold the URL, so a failure prints a fixed
-text. A failed ping never stops the pipeline: the exit code is 0. A bad
+of every message. Some urllib errors repeat the URL (for example InvalidURL and
+ValueError), so a failure prints a fixed text. A failed ping never stops the pipeline: the exit code is 0. A bad
 argument exits 2.
 """
 
@@ -21,7 +21,7 @@ RETRY_DELAY_SECONDS = 1
 
 
 def ping(status: str, message: str) -> bool:
-    """POST the message. Return True when Healthchecks.io accepts it."""
+    """POST the message. Return True when Healthchecks.io accepts it or the feature is off."""
     url = settings.healthcheck_url(status)
     if url is None:
         return True
@@ -31,7 +31,9 @@ def ping(status: str, message: str) -> bool:
             request = urllib.request.Request(url, data=data, method="POST")
             with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS):
                 return True
-        except Exception:  # noqa: BLE001 — the text can hold the key
+        # Any failure, a bad URL included, is only a missed ping. Do not print
+        # the exception, because its text can hold the key.
+        except Exception:  # noqa: BLE001
             if attempt + 1 < TRIES:
                 time.sleep(RETRY_DELAY_SECONDS)
     print("WARNING: Failed to send Healthchecks.io ping", file=sys.stderr)

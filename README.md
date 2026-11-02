@@ -258,7 +258,7 @@ The pipeline reads all settings from environment variables. `.env.sample` lists 
 
 Three variables are required: `USERNAME`, `PASSWORD` and `GOOGLE_CALENDAR_ICS_URL`. If one is missing, empty, or starts with `op://`, the run stops with an error that names the variable.
 
-Each optional feature turns on when all its settings are present. Set `<FEATURE>_ENABLED=false` to turn it off. An empty or unknown flag value also turns it off and logs a warning. The features are the digest email, Claude tasting notes, community notes and the Healthchecks.io ping. Each run logs the state of each feature.
+Each optional feature turns on when all its settings are present and valid (`.env.sample` lists the rules). Set `<FEATURE>_ENABLED=false` to turn it off. An empty or unknown flag value also turns it off and logs a warning. The features are the digest email, Claude tasting notes, community notes and the Healthchecks.io ping. Each run logs the state of each feature.
 
 Choose how the values reach the pipeline:
 

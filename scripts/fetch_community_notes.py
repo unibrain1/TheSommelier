@@ -167,8 +167,9 @@ def fetch_community_notes(rss_url: str, cache_path: Path) -> None:
         with urllib.request.urlopen(req, timeout=30) as resp:
             xml_text = resp.read().decode("utf-8", errors="replace")
     except Exception as e:
-        # The error text can hold the URL, and the URL holds the CK token. The
-        # HTTP status is safe, and it tells a bad token (401) from an outage.
+        # Some error texts repeat the URL (for example InvalidURL and
+        # ValueError), and the URL holds the CK token. The HTTP status is safe, and it can tell a token
+        # problem from an outage.
         status = f" {e.code}" if isinstance(e, urllib.error.HTTPError) else ""
         print(f"ERROR: RSS fetch failed ({type(e).__name__}{status})", file=sys.stderr)
         sys.exit(1)

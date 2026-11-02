@@ -1,7 +1,7 @@
 """Unit tests for parse_inventory() in scripts/parse_inventory.py.
 
 Tests cover:
-- KEEP_FIELDS contains the new fields added in issue #27
+- KEEP_FIELDS contains the score, note, price and valuation fields
 - PRO_SCORE_FIELDS constant matches expected values
 - Backward compatibility: minimal TSV with original fields only
 - Type coercions for new fields (pro scores, cNotes, Price, Valuation)
@@ -37,7 +37,7 @@ def _write_tsv(tmp_path: Path, headers: list[str], rows: list[dict]) -> Path:
 
 
 class TestKeepFieldsExpansion:
-    """KEEP_FIELDS should include all new fields added in issue #27."""
+    """KEEP_FIELDS should include the score, note, price and valuation fields."""
 
     def test_wa_in_keep_fields(self):
         assert "WA" in KEEP_FIELDS

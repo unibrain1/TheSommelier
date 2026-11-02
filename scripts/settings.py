@@ -22,6 +22,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 REQUIRED = ("USERNAME", "PASSWORD", "GOOGLE_CALENDAR_ICS_URL")
@@ -66,14 +67,27 @@ _URL_PART = re.compile(r"[A-Za-z0-9_-]+")
 _TRUE = {"true", "1", "yes"}
 _FALSE = {"false", "0", "no"}
 
+# Optional values that are not feature settings. An op:// value here would
+# become a wrong path, host or address, with no other message.
+_PATH_VARS = ("DATA_DIR", "SITE_DIR")
+_OTHER_VARS = ("SMTP_HOST", "SMTP_FROM", "SITE_URL")
+
+# The state classes of the plan. Callers test kind, not the reason text, so a
+# change to the log text cannot change what a caller does.
+Kind = Literal["on", "disabled", "not_configured", "bad_flag", "incomplete"]
+
 
 @dataclass(frozen=True)
 class FeatureState:
     name: str
-    on: bool
+    kind: Kind
     reason: str = ""
     # Names of variables that are missing or not valid. Never values.
     problems: list[str] = field(default_factory=list)
+
+    @property
+    def on(self) -> bool:
+        return self.kind == "on"
 
     def log_line(self) -> str:
         if self.on:
@@ -84,7 +98,7 @@ class FeatureState:
 @dataclass(frozen=True)
 class SmtpSettings:
     host: str
-    port: int
+    port: int | None
     username: str
     password: str = field(repr=False)
     sender: str
@@ -98,6 +112,13 @@ def _env(name: str) -> str:
 def _unresolved(value: str) -> bool:
     """An op:// reference means the host did not resolve the secret."""
     return value.startswith("op://")
+
+
+def _var_unresolved(var: str) -> bool:
+    # DIGEST_RECIPIENTS is a list, so one op:// entry can follow a real address.
+    if var == "DIGEST_RECIPIENTS":
+        return any(_unresolved(r) for r in _recipients())
+    return _unresolved(_env(var))
 
 
 def data_dir() -> Path:
@@ -159,6 +180,7 @@ def _invalid_values(name: str) -> list[str]:
     if name == "digest":
         if _smtp_port() is None:
             problems.append("SMTP_PORT")
+        problems += [v for v in ("SMTP_HOST", "SMTP_FROM") if _unresolved(_env(v))]
     elif name == "healthcheck":
         key = _env("HEALTHCHECK_PING_KEY")
         if key and not _unresolved(key) and not _URL_PART.fullmatch(key):
@@ -185,28 +207,29 @@ def feature(name: str) -> FeatureState:
     flag_value = _env(flag).lower()
     if flag in os.environ and flag_value not in _TRUE | _FALSE:
         # An unknown value fails safe: the feature stays off.
-        return FeatureState(name, False, f"not valid: {flag}", [flag])
+        return FeatureState(name, "bad_flag", f"not valid: {flag}", [flag])
     if flag_value in _FALSE:
-        return FeatureState(name, False, f"disabled by {flag}")
+        return FeatureState(name, "disabled", f"disabled by {flag}")
 
     present = [v for v in needed if _present(v)]
     if not present:
-        return FeatureState(name, False, "not configured")
+        return FeatureState(name, "not_configured", "not configured")
 
-    problems = [v for v in needed if not _present(v) or _unresolved(_env(v))]
+    problems = [v for v in needed if not _present(v) or _var_unresolved(v)]
     problems += _invalid_values(name)
     if problems:
         return FeatureState(
-            name, False, "missing or not valid: " + ", ".join(problems), problems
+            name, "incomplete", "missing or not valid: " + ", ".join(problems), problems
         )
-    return FeatureState(name, True)
+    return FeatureState(name, "on")
 
 
 def smtp() -> SmtpSettings:
+    """Return the SMTP values. Port is None when SMTP_PORT is not valid."""
     username = _env("SMTP_USERNAME")
     return SmtpSettings(
         host=_env("SMTP_HOST") or DEFAULT_SMTP_HOST,
-        port=_smtp_port() or DEFAULT_SMTP_PORT,
+        port=_smtp_port(),
         username=username,
         password=_env("SMTP_PASSWORD"),
         sender=_env("SMTP_FROM") or username,
@@ -230,6 +253,12 @@ def site_url() -> str:
     return _env("SITE_URL")
 
 
+OP_WARNING = (
+    "WARNING: A value starts with op://. "
+    "Resolve it before the start, for example with op run."
+)
+
+
 def check_lines() -> tuple[list[str], list[str], list[str]]:
     """Return (info lines, warnings, errors). No line holds a value."""
     states = [feature(n) for n in FEATURES]
@@ -241,11 +270,12 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
             warnings.append(
                 f"WARNING: {n} is off. Missing or not valid: {', '.join(state.problems)}"
             )
-            if any(_unresolved(_env(v)) for v in state.problems):
-                warnings.append(
-                    "WARNING: A value starts with op://. "
-                    "Resolve it before the start, for example with op run."
-                )
+            if any(_var_unresolved(v) for v in state.problems):
+                warnings.append(OP_WARNING)
+    for var in _OTHER_VARS:
+        if _unresolved(_env(var)) and not any(var in s.problems for s in states):
+            warnings.append(f"WARNING: {var} is not resolved. It is not used.")
+            warnings.append(OP_WARNING)
     for var in ANTHROPIC_VARS:
         if _env(var):
             warnings.append(
@@ -255,6 +285,11 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
             )
     errors = [
         f"ERROR: Required variable {n} is missing or not resolved" for n in required()
+    ]
+    errors += [
+        f"ERROR: {n} is not resolved. Set a folder path."
+        for n in _PATH_VARS
+        if _unresolved(_env(n))
     ]
     return info, warnings, errors
 

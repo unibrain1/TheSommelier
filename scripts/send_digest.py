@@ -12,10 +12,12 @@ Usage: send_digest.py [--dry-run] [--force]
 
 import json
 import smtplib
+import ssl
 import sys
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import parseaddr
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -73,19 +75,20 @@ def build_email(
     return msg
 
 
-def send_email(msg: MIMEMultipart, smtp_settings: settings.SmtpSettings) -> None:
-    """Send via SMTP with STARTTLS, to the host and port from settings."""
+def send_email(msg: MIMEMultipart, smtp_settings: settings.SmtpSettings) -> list[str]:
+    """Send via SMTP with STARTTLS. Return the recipients that the server refused.
+
+    smtplib raises only when the server refuses all recipients. When it refuses
+    some, send_message returns them, and the others get the email.
+    """
+    if smtp_settings.port is None:
+        raise ValueError("SMTP_PORT is not valid")
     with smtplib.SMTP(smtp_settings.host, smtp_settings.port) as server:
-        server.starttls()
+        # Without a context, starttls() does not check the certificate or the
+        # host name, so any server on the path could read the password.
+        server.starttls(context=ssl.create_default_context())
         server.login(smtp_settings.username, smtp_settings.password)
-        server.send_message(msg)
-
-
-def _missing_names(state: settings.FeatureState) -> list[str]:
-    """Return the names of the digest settings to report. Never values."""
-    if state.problems:
-        return state.problems
-    return list(settings.FEATURES["digest"][1])
+        return sorted(server.send_message(msg))
 
 
 def main() -> None:
@@ -93,12 +96,17 @@ def main() -> None:
     force = "--force" in sys.argv
 
     state = settings.feature("digest")
-    if not state.on and state.reason.startswith("disabled"):
-        print("Digest disabled (DIGEST_ENABLED=false)")
+    if state.kind == "disabled":
+        print(f"Digest off ({state.reason})")
+        return
+    # The documented rule for a flag that is not valid is "off, with a
+    # warning", so the scheduled job must not fail every day on it.
+    if state.kind == "bad_flag":
+        print(f"WARNING: Digest off ({state.reason})", file=sys.stderr)
         return
     # No digest settings at all is a normal state (settings.py check logs it),
     # so the scheduled job must not fail on it. Partial settings still fail.
-    if not dry_run and not state.on and state.reason == "not configured":
+    if not dry_run and state.kind == "not_configured":
         print("Digest email not configured — nothing to send")
         return
 
@@ -142,7 +150,7 @@ def main() -> None:
     if not dry_run and not state.on:
         print(
             "ERROR: Digest email is not configured. Missing or not valid: "
-            + ", ".join(_missing_names(state)),
+            + ", ".join(state.problems),
             file=sys.stderr,
         )
         sys.exit(1)
@@ -162,13 +170,18 @@ def main() -> None:
         return
 
     try:
-        send_email(msg, smtp_settings)
+        refused = send_email(msg, smtp_settings)
     except (smtplib.SMTPException, OSError) as e:
         print(f"ERROR: Failed to send digest email: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # The other recipients got the email, so a resend would duplicate it.
     mark_sent()
-    print(f"Digest sent to {', '.join(recipients)}")
+    # smtplib gives the refused recipients as bare addresses, without a name.
+    sent = [r for r in recipients if parseaddr(r)[1] not in refused]
+    print(f"Digest sent to {', '.join(sent)}")
+    if refused:
+        print(f"WARNING: The server refused: {', '.join(refused)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

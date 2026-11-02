@@ -2,6 +2,7 @@
 
 import json
 import smtplib
+import ssl
 
 import pytest
 
@@ -104,6 +105,7 @@ class RecordingSMTP:
     """Replaces smtplib.SMTP and records the calls."""
 
     instances: list["RecordingSMTP"] = []
+    refuse: dict[str, tuple] = {}
 
     def __init__(self, host, port):
         self.host, self.port = host, port
@@ -116,7 +118,8 @@ class RecordingSMTP:
     def __exit__(self, *exc):
         return False
 
-    def starttls(self):
+    def starttls(self, context=None):
+        self.tls_context = context
         self.calls.append(("starttls",))
 
     def login(self, user, password):
@@ -124,11 +127,13 @@ class RecordingSMTP:
 
     def send_message(self, msg):
         self.calls.append(("send_message", msg))
+        return dict(RecordingSMTP.refuse)
 
 
 @pytest.fixture
 def smtp(monkeypatch):
     RecordingSMTP.instances = []
+    RecordingSMTP.refuse = {}
     monkeypatch.setattr(smtplib, "SMTP", RecordingSMTP)
     return RecordingSMTP
 
@@ -169,6 +174,28 @@ class TestSendEmail:
         (server,) = smtp.instances
         assert (server.host, server.port) == ("mail.example.test", 2525)
         assert [c[0] for c in server.calls] == ["starttls", "login", "send_message"]
+
+    def test_send_email_refuses_a_port_that_is_not_valid(self, monkeypatch, smtp):
+        set_creds(monkeypatch, SMTP_PORT="abc")
+        msg = build_email(
+            {"wine": None}, "<p>x</p>", "sender@example.com", ["a@example.com"]
+        )
+        with pytest.raises(ValueError, match="SMTP_PORT"):
+            send_digest.send_email(msg, settings.smtp())
+        assert smtp.instances == []
+
+    def test_send_email_checks_server_certificate(self, monkeypatch, smtp):
+        # Without a context, smtplib does not check the certificate, so a
+        # man in the middle on SMTP_HOST could read the password at login.
+        set_creds(monkeypatch)
+        msg = build_email(
+            {"wine": None}, "<p>x</p>", "sender@example.com", ["a@example.com"]
+        )
+        send_digest.send_email(msg, settings.smtp())
+        (server,) = smtp.instances
+        assert server.tls_context is not None
+        assert server.tls_context.verify_mode == ssl.CERT_REQUIRED
+        assert server.tls_context.check_hostname is True
 
 
 @pytest.fixture
@@ -274,9 +301,59 @@ class TestMain:
     ):
         set_creds(monkeypatch, DIGEST_ENABLED="false")
         send_digest.main()
-        assert "Digest disabled" in capsys.readouterr().out
+        assert "Digest off (disabled by DIGEST_ENABLED)" in capsys.readouterr().out
         assert smtp.instances == []
         assert not (digest_dirs[0] / "digest_last_sent.txt").exists()
+
+    @pytest.mark.parametrize("flag", ["0", "no"])
+    def test_main_digest_disabled_message_for_other_false_values(
+        self, digest_dirs, monkeypatch, smtp, capsys, flag
+    ):
+        set_creds(monkeypatch, DIGEST_ENABLED=flag)
+        send_digest.main()
+        assert "DIGEST_ENABLED=false" not in capsys.readouterr().out
+        assert smtp.instances == []
+
+    def test_main_bad_flag_warns_and_exits_0(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        set_creds(monkeypatch, DIGEST_ENABLED="off")
+        send_digest.main()
+        err = capsys.readouterr().err
+        assert "WARNING: Digest off (not valid: DIGEST_ENABLED)" in err
+        assert smtp.instances == []
+        assert not (digest_dirs[0] / "digest_last_sent.txt").exists()
+
+    def test_main_partly_refused_warns_and_marks_sent(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        data, _ = digest_dirs
+        set_creds(monkeypatch)
+        smtp.refuse = {"b@example.com": (550, b"no such user")}
+        send_digest.main()
+        out, err = capsys.readouterr()
+        assert "Digest sent to a@example.com\n" in out
+        assert "WARNING: The server refused: b@example.com" in err
+        assert (data / "digest_last_sent.txt").read_text() == "2026-04-18"
+
+    def test_main_refused_named_recipient_is_not_listed_as_sent(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        set_creds(monkeypatch, DIGEST_RECIPIENTS="a@example.com,Bee <b@example.com>")
+        smtp.refuse = {"b@example.com": (550, b"no such user")}
+        send_digest.main()
+        out = capsys.readouterr().out
+        assert "Digest sent to a@example.com\n" in out
+
+    def test_main_op_recipient_in_list_exits_1(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        set_creds(monkeypatch, DIGEST_RECIPIENTS="a@example.com,op://v/r")
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 1
+        assert "DIGEST_RECIPIENTS" in capsys.readouterr().err
+        assert smtp.instances == []
 
     def test_main_invalid_smtp_port_exits_1(
         self, digest_dirs, monkeypatch, smtp, capsys

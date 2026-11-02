@@ -118,6 +118,41 @@ class TestGeneratePlanPaths:
         assert not (dirs.data / "plan_previous.json").exists()
         assert list(dirs.cwd.iterdir()) == []
 
+    def test_main_without_live_plan_logs_empty_history(
+        self, dirs, generate_plan, monkeypatch, capsys
+    ):
+        inv = dirs.root / "inventory.json"
+        inv.write_text(json.dumps(inventory()), encoding="utf-8")
+        out = dirs.root / "out.json"
+        monkeypatch.setattr(sys, "argv", ["generate_plan.py", str(inv), str(out)])
+        generate_plan.main()
+        assert "changelog history starts empty" in capsys.readouterr().out
+
+    def test_main_backup_failure_keeps_live_history(
+        self, dirs, generate_plan, monkeypatch, capsys
+    ):
+        live = {
+            "allWeeks": [],
+            "changelogHistory": [
+                {"date": "2999-01-01", "changes": [], "marker": "LIVE-MARK"}
+            ],
+        }
+        (dirs.site / "plan.json").write_text(json.dumps(live), encoding="utf-8")
+        # A folder in place of the backup file makes the write fail.
+        (dirs.data / "plan_previous.json").mkdir()
+        inv = dirs.root / "inventory.json"
+        inv.write_text(json.dumps(inventory()), encoding="utf-8")
+        out = dirs.root / "out.json"
+        monkeypatch.setattr(sys, "argv", ["generate_plan.py", str(inv), str(out)])
+
+        generate_plan.main()
+
+        err = capsys.readouterr().err
+        assert "could not back up plan" in err
+        assert "could not read existing plan" not in err
+        new_plan = json.loads(out.read_text(encoding="utf-8"))
+        assert any(e.get("marker") == "LIVE-MARK" for e in new_plan["changelogHistory"])
+
     def test_load_community_notes_reads_data_dir(self, dirs, generate_plan):
         assert generate_plan._load_community_notes() is None
         notes = {"123": [{"iNote": "9", "body": "from-data-dir"}]}

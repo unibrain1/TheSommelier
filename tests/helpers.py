@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-# Minimal original 22-field header (fields present before issue #27 changes)
+# Minimal 22-field header: the base fields, without the score and valuation fields
 ORIGINAL_FIELDS = [
     "iWine",
     "Vintage",
@@ -34,7 +34,7 @@ ORIGINAL_FIELDS = [
     "MY",
 ]
 
-# Full header including all new fields from issue #27
+# Full header: the base fields plus the score and valuation fields
 ALL_FIELDS = ORIGINAL_FIELDS + [
     "WA",
     "WS",
