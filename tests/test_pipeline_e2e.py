@@ -9,6 +9,7 @@ not curl).
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -299,14 +300,18 @@ def test_pipeline_site_dir_outside_data_dir(harness, tmp_path):
     data = Path(harness.env["DATA_DIR"])
     site = tmp_path / "elsewhere" / "public" / "site"
 
-    result = harness.run("fetch_docker.sh", extra={"SITE_DIR": str(site)})
+    result = harness.run(
+        "fetch_docker.sh", extra={"SITE_DIR": str(site), "HA_ENABLED": "true"}
+    )
 
     assert result.returncode == 0, _output(result)
     _assert_site_files(site)
     assert not (data / "site").exists()
     assert (data / "inventory.json").is_file()
     # The run output stays out of the data folder: it holds only staged files.
-    assert not (data / "thisweek.json").exists()
+    for name in ("thisweek.json", "today.json"):
+        assert (site / name).is_file()
+        assert not (data / name).exists()
     assert not (site / "inventory.json").exists()
 
 
@@ -710,17 +715,23 @@ def test_readme_sensor_attributes_exist_in_the_json(harness):
     site = Path(harness.env["SITE_DIR"])
     week = json.loads((site / "thisweek.json").read_text())
     # today.json holds one entry of pairing_suggestions.json, or a date and null.
-    meal = json.loads((site / "pairing_suggestions.json").read_text())["suggestions"][0]
+    # pairing.py adds suggested_bottle only when the score is poor or partial, so
+    # take the keys of all entries.
+    suggestions = json.loads((site / "pairing_suggestions.json").read_text())[
+        "suggestions"
+    ]
+    meal_keys = set().union(*suggestions)
 
     sensors = readme_rest_sensors()
     assert [Path(s["resource"]).name for s in sensors] == [
         "thisweek.json",
         "today.json",
     ]
-    for sensor, entry in zip(sensors, (week, meal)):
-        attributes = sensor["sensor"][0]["json_attributes"]
-        # pairing.py adds suggested_bottle only when the planned wine pairs badly.
-        missing = set(attributes) - set(entry) - {"suggested_bottle"}
+    for sensor, keys in zip(sensors, (set(week), meal_keys)):
+        spec = sensor["sensor"][0]
+        state_field = re.search(r"value_json\.(\w+)", spec["value_template"])
+        assert state_field, f"{sensor['resource']}: no field in value_template"
+        missing = ({state_field.group(1)} | set(spec["json_attributes"])) - keys
         assert not missing, f"{sensor['resource']}: {sorted(missing)}"
 
 
@@ -748,3 +759,44 @@ def test_ha_off_removes_files_from_an_earlier_run(harness):
     assert not (site / "today.json").exists()
     assert "Skipping Home Assistant JSON" in result.stdout
     _assert_site_files(site)
+
+
+def test_ha_failed_script_removes_its_file_and_run_goes_on(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    (site / "thisweek.json").write_text('{"name": "old"}')
+    (harness.app / "scripts" / "thisweek.py").write_text(
+        "import sys\nprint('{\"na')\nsys.exit(1)\n"
+    )
+
+    result = harness.run("fetch_docker.sh", extra={"HA_ENABLED": "true"})
+
+    assert result.returncode == 0, _output(result)
+    assert "WARNING: thisweek.py failed (exit 1)" in result.stdout
+    # No empty or partial file at the public URL, and no temporary file.
+    assert not (site / "thisweek.json").exists()
+    assert not list(site.glob(".thisweek.json.*"))
+    # The other file and the rest of the run are not affected.
+    assert json.loads((site / "today.json").read_text())
+    assert "Sync complete" in result.stdout
+
+
+def test_ha_files_are_readable_by_the_web_server(harness):
+    result = harness.run("fetch_docker.sh", extra={"HA_ENABLED": "true"})
+
+    assert result.returncode == 0, _output(result)
+    site = Path(harness.env["SITE_DIR"])
+    for name in ("thisweek.json", "today.json"):
+        assert (site / name).stat().st_mode & 0o777 == 0o644
+
+
+def test_leftover_ha_temp_files_are_removed_at_start(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    (site / ".thisweek.json.AbC123").write_text('{"na')
+    (site / ".today.json.XyZ789").write_text("")
+
+    result = harness.run("fetch_docker.sh")
+
+    assert result.returncode == 0, _output(result)
+    assert not list(site.glob(".*.json.*"))

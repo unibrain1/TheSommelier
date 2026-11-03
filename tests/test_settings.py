@@ -760,3 +760,20 @@ class TestOptInFeature:
         on = run_cli(["check"], {**REQUIRED_VALUES, flag: "true"})
         assert re.search(rf"^\s*{name}: on$", on.stdout, re.MULTILINE)
         assert "WARNING" not in on.stdout + on.stderr
+
+
+# --- removed HA_SSH_TARGET ------------------------------------------------
+
+
+def test_removed_ssh_target_gives_warning_without_value(clean_env):
+    result = run_cli(
+        ["check"], {**REQUIRED_VALUES, "HA_SSH_TARGET": "root@secret-host"}
+    )
+    assert result.returncode == 0
+    assert "WARNING: HA_SSH_TARGET is set. The SSH push was removed." in result.stderr
+    assert "secret-host" not in result.stdout + result.stderr
+
+
+def test_no_ssh_target_warning_when_not_set(clean_env):
+    result = run_cli(["check"], REQUIRED_VALUES)
+    assert "HA_SSH_TARGET" not in result.stdout + result.stderr

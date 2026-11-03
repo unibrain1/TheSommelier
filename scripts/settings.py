@@ -13,6 +13,10 @@ rules forbid eval:
 A bad argument exits 2. DATA_DIR defaults to /data, SITE_DIR defaults to
 $DATA_DIR/site, and PLAN_CONFIG defaults to /config/plan.yaml.
 
+A feature turns on when all its settings are present and valid. A feature with
+no settings (home_assistant) turns on only when its <FEATURE>_ENABLED flag is a
+true value.
+
 Each function reads os.environ when it is called, not at import, so tests can
 change the environment with monkeypatch.
 """
@@ -27,6 +31,10 @@ from urllib.parse import urlsplit
 
 REQUIRED = ("USERNAME", "PASSWORD", "GOOGLE_CALENDAR_ICS_URL")
 ANTHROPIC_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+# The SSH push to Home Assistant was removed in v4.0.0. A host that still sets
+# this variable would otherwise see frozen sensors with no signal.
+REMOVED_HA_VAR = "HA_SSH_TARGET"
 
 DEFAULT_DATA_DIR = "/data"
 DEFAULT_PLAN_CONFIG = "/config/plan.yaml"
@@ -63,6 +71,7 @@ ALL_VARS: tuple[str, ...] = (
     "HEALTHCHECK_SLUG",
     "HEALTHCHECK_BASE_URL",
     *ANTHROPIC_VARS,
+    REMOVED_HA_VAR,
 )
 
 # The key and the slug are path parts of the ping URL. "/", "?" or "#" would move
@@ -296,6 +305,12 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
                 "CLAUDE_CODE_OAUTH_TOKEN, so the runs go on the API bill, "
                 "not the subscription."
             )
+    if _env(REMOVED_HA_VAR):
+        warnings.append(
+            f"WARNING: {REMOVED_HA_VAR} is set. The SSH push was removed. "
+            "Remove it from .env. To feed the Home Assistant sensors, set "
+            "HA_ENABLED=true and change the sensors to read the site URLs."
+        )
     errors = [
         f"ERROR: Required variable {n} is missing or not resolved" for n in required()
     ]

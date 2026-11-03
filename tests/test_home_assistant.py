@@ -33,6 +33,9 @@ def test_no_file_pushes_to_home_assistant():
     hits = []
     for path in files:
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            # settings.py names the old variable to warn a host that still sets it.
+            if path.name == "settings.py" and "HA_SSH_TARGET" in line:
+                continue
             if PUSH_MARKERS.search(line):
                 hits.append(f"{path.relative_to(REPO)}:{number}: {line.strip()}")
     assert hits == []

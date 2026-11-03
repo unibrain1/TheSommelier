@@ -212,7 +212,7 @@ With the default `SYNC_SCHEDULE` (every 30 minutes, 06:00–22:00 Pacific), the 
 
 - To make Home Assistant read the files now, go to Developer Tools → Actions and run `rest.reload`.
 - If a URL gives 404, check that `HA_ENABLED=true` is in the container environment and that the last pipeline run did not skip the files.
-- If a sensor shows `unknown` and the log has "WARNING: thisweek.py failed" or "WARNING: today.py failed", the file is empty or not valid JSON. Fix the cause in the log, then run the pipeline again.
+- If a sensor shows `unavailable` and the log has "WARNING: thisweek.py failed" or "WARNING: today.py failed", the script failed and the pipeline removed the file. Read the log to find the cause, then run the pipeline again.
 - If a sensor shows `unknown`, open the URL in a browser and compare the field names with `value_template` and `json_attributes`.
 
 ## Healthchecks.io
