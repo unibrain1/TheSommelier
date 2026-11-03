@@ -25,6 +25,8 @@ Two compose files:
 - `examples/compose.yaml` is for a user with no checkout. It uses the image `ghcr.io/unibrain1/thesommelier:4.0` and lists every compose option and every env variable with a comment. A test keeps its variable list in step with the code.
 - `docker-compose.yml` builds the image from a checkout (`build: .`). It is generic. Host settings (DNS, port, Traefik labels and network) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. On the production server, the HomeLab Ansible deploy writes the override. It must never write the tracked `docker-compose.yml`.
 
+`.github/workflows/publish-image.yml` builds the image for amd64 and arm64. A `v*` tag pushes `X.Y.Z`, `X.Y` and `latest`. A push to `main` or to a `milestone/**` branch pushes `edge`. A manual run needs the workflow file on `main`, and a manual run on a branch also pushes `edge`. A pull request that changes an image file builds only. A prerelease tag (with `-`) does not push `latest`. The GHCR package stays private until the v4.0.0 release. Then the owner sets it to public in the package settings.
+
 The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
 The image holds the code. The container runs no `git` and no `pip install`. It does not update itself.
