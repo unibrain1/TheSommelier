@@ -19,9 +19,18 @@ NGINX_TEMP_DIRECTIVES = (
 )
 
 
+COMPOSE_FILES = ("docker-compose.yml", "examples/compose.yaml")
+
+
+@pytest.fixture(scope="module", params=COMPOSE_FILES)
+def compose(request) -> dict:
+    """Each check runs on the build file and on the sample for the published image."""
+    return yaml.safe_load((REPO / request.param).read_text(encoding="utf-8"))
+
+
 @pytest.fixture(scope="module")
-def compose() -> dict:
-    return yaml.safe_load((REPO / "docker-compose.yml").read_text(encoding="utf-8"))
+def sample() -> dict:
+    return yaml.safe_load((REPO / "examples/compose.yaml").read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
@@ -116,6 +125,62 @@ def test_compose_service_is_hardened(compose, service):
     assert "/tmp" in config["tmpfs"]
     assert config["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in config["security_opt"]
+
+
+@pytest.mark.parametrize("service", SERVICES)
+def test_sample_uses_the_published_image_and_does_not_build(sample, service):
+    config = sample["services"][service]
+
+    # A version tag, not latest or edge: the sample must not follow a moving tag.
+    assert re.fullmatch(
+        r"ghcr\.io/unibrain1/thesommelier:\d+\.\d+(\.\d+)?", config["image"]
+    )
+    assert "build" not in config
+
+
+@pytest.mark.parametrize("service", SERVICES)
+def test_sample_stops_when_a_required_secret_is_missing(sample, service):
+    env = sample["services"][service]["environment"]
+
+    for name in settings.REQUIRED:
+        assert env[name].startswith("${" + name + ":?"), f"{service} {name}"
+
+
+def test_sample_follows_compose_naming_practice(sample):
+    # A fixed project name keeps the volume name stable. A fixed container
+    # name blocks a second project and a scale-out, so the sample sets none.
+    assert sample["name"] == "the-sommelier"
+    assert "version" not in sample
+    for service, config in sample["services"].items():
+        assert "container_name" not in config, service
+        options = config["logging"]["options"]
+        assert options["max-size"] and options["max-file"], service
+
+
+def test_sample_restarts_the_site_service_only(sample):
+    assert sample["services"]["the-sommelier"]["restart"] in (
+        "unless-stopped",
+        "always",
+    )
+    assert "restart" not in sample["services"]["run-now"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "SMTP_USERNAME",
+        "SMTP_PASSWORD",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CT_COMMUNITY_NOTES_RSS",
+        "HEALTHCHECK_PING_KEY",
+    ],
+)
+def test_sample_reads_each_optional_secret_from_the_host(name):
+    # The docs say that a ${NAME} line is a secret that goes in .env. A literal
+    # value here would lead the user to paste the secret into compose.yaml.
+    text = (REPO / "examples" / "compose.yaml").read_text(encoding="utf-8")
+
+    assert re.search(rf'^\s*#?\s?{name}: "\${{{name}}}"$', text, re.M)
 
 
 def test_nginx_static_root_is_the_image_site(nginx_conf):

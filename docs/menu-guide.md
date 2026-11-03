@@ -1,87 +1,33 @@
-# Menu Plan Guide
+# Menu guide
 
-How to write Google Calendar menu entries for the best wine pairing suggestions from The Sommelier.
+How to write Google Calendar menu entries for the best wine pairings.
+
+[Back to the README](../README.md)
 
 ## Setup
 
-Menu data comes from a Google Calendar (managed via Paprika or directly). The pipeline fetches the calendar's secret .ics URL, extracts meals, and matches food keywords to suggest wine pairings.
+The sync reads your meals from a Google Calendar (see [Menu plan setup](menu-plan.md)). It finds food words in each event and uses them to suggest a wine. [How it works](how-it-works.md#food-wine-pairing) explains the results.
 
-## Best Format
+## Best format
 
 | Field | Example |
 |---|---|
 | **Title** | `Grilled Lamb Chops` |
 | **Description** (optional) | `Italian style, with risotto` |
 
-The engine scans both title and description, so you can be brief.
+The sync reads both the title and the description, so you can be brief.
 
 ## Tips
 
 - **Lead with the protein**: "Salmon with asparagus" works, "Dinner" doesn't
 - **Add cuisine when relevant**: "Thai green curry" triggers different pairings than just "curry"
 - **Cooking method helps**: "Braised short ribs" and "Grilled steak" both match on both the protein and the method
-- **Multiple keywords stack**: "Grilled lamb" matches both "grilled" (bold red or rosé) and "lamb" (bold red) — reinforcing the suggestion
+- **Several keywords add up**: "Grilled lamb" matches both "grilled" (bold red or rosé) and "lamb" (bold red). Both support the same suggestion.
+- **More detail gives better pairings**: A descriptive title gives the sync more to match.
 
-## Output Format
+## Recognized keywords
 
-The pipeline produces `data/menu.json` — a JSON array of menu entries sorted by date. Each entry has:
-
-| Field | Type | Description |
-|---|---|---|
-| `date` | string | ISO date of the meal (e.g., `"2026-03-22"`) |
-| `meal` | string | Calendar event title — the recipe name |
-| `description` | string | Calendar event description (often just `"Dinner"`) |
-| `keywords` | string[] | Auto-extracted food keywords used for wine pairing |
-
-Example:
-
-```json
-[
-  {
-    "date": "2026-03-17",
-    "meal": "Slow-Cooker Corned Beef and Cabbage (Irish Boiled Dinner), Apple Pie",
-    "description": "Dinner",
-    "keywords": ["beef", "corned beef"]
-  },
-  {
-    "date": "2026-03-22",
-    "meal": "Mexican Rotisserie Chicken, Feta Lime Coleslaw",
-    "description": "Dinner",
-    "keywords": ["beans", "chicken", "mexican"]
-  },
-  {
-    "date": "2026-03-25",
-    "meal": "Cast Iron Pan Pizza",
-    "description": "Dinner",
-    "keywords": ["pizza"]
-  }
-]
-```
-
-The more descriptive the meal title, the more keywords get extracted and the better the pairing recommendations.
-
-## How Pairing Works
-
-1. The pipeline extracts food keywords from your calendar events
-2. An LLM enrichment step extracts structured food features (protein, preparation, richness, spice, acidity, cuisine) for deeper matching
-3. The pairing engine tries enriched features first, falls back to keyword matching, then falls back to neutral
-4. If the planned wine for that week doesn't match, The Sommelier suggests a specific bottle from your cellar
-5. Suggestions prioritize bottles that need drinking (past peak, expiring soon)
-6. Each meal gets a unique suggestion — no bottle is recommended twice
-7. Each pairing includes a confidence level (high/medium/low) based on signal strength
-
-## What You'll See on the Plan
-
-- **Pairs Well** (green, wine icon) — the planned wine matches your meal
-- **Sommelier Pick** (blue, wine icon) — a specific bottle suggestion from your cellar
-- **No Match** (muted) — no food keywords matched, enjoy the planned wine
-
-Each pairing shows a confidence badge (high, med, low) indicating how many food features or keywords matched.
-
-## Recognized Keywords
-
-All keywords are defined in `scripts/wine_keywords.py`. Adding a keyword there automatically makes it available for both extraction and pairing.
-
+The sync matches these words in the title and the description.
 ### Proteins
 beef, steak, ribeye, filet, brisket, burger, short ribs, ribs, corned beef, lamb, veal, venison, elk, bison, pork, sausage, chops, pulled pork, carnitas, bacon, ham, chicken, turkey, duck, quail, cornish hen, salmon, tuna, halibut, cod, trout, swordfish, mahi, shrimp, crab, lobster, scallops, oysters, mussels, clams, fish, seafood, shellfish
 
@@ -91,6 +37,6 @@ italian, french, japanese, thai, mexican, indian, chinese, korean, mediterranean
 ### Dishes / Styles
 salad, soup, pasta, risotto, pizza, taco, tacos, burrito, enchilada, quesadilla, curry, stew, chili, casserole, sandwich, lasagna, noodle, ramen, pho, udon, soba, mac, shepherd, beans, lentil, tofu, tempeh, vegetarian, vegan
 
-## Not Yet Supported
+## Not supported
 
-Side dishes as standalone entries and desserts are not matched. Sauces, spice levels, and cooking methods are now handled by the LLM enrichment step, which extracts structured food features for more nuanced pairing.
+The sync does not match side dishes that stand alone as an entry, or desserts.

@@ -277,12 +277,12 @@ Dark fruit, firm tannins, long finish.</description>
 """
 
 
-def readme_rest_sensors() -> list[dict]:
-    """Return the REST sensors of the README YAML under "Home Assistant"."""
-    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text(
-        encoding="utf-8"
-    )
-    section = readme.split("\n## Home Assistant\n", 1)[1].split("\n## ", 1)[0]
+def ha_rest_sensors() -> list[dict]:
+    """Return the REST sensors of the first YAML block in docs/home-assistant.md."""
+    page = (
+        Path(__file__).resolve().parent.parent / "docs" / "home-assistant.md"
+    ).read_text(encoding="utf-8")
+    section = re.split(r"\n## ", page, maxsplit=1)[0]
     block = re.search(r"```yaml\n(.*?)```", section, re.S)
-    assert block, "no yaml block in the README Home Assistant section"
+    assert block, "no yaml block in the Home Assistant page"
     return yaml.safe_load(block.group(1))["rest"]

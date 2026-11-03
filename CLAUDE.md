@@ -4,7 +4,7 @@
 
 Personal wine cellar management project. Maintains a multi-year wine drinking plan synchronized with a live CellarTracker inventory and a Google Calendar menu plan. A scheduled pipeline (every 30 minutes, 06:00–22:00 Pacific) generates a fresh plan, adds tasting notes via Claude, and publishes a web app.
 
-The pipeline flow is in `README.md`. `plans/` and `data/` are gitignored.
+The flow of a sync is in `docs/how-it-works.md`. The user docs start at `README.md`. `plans/` and `data/` are gitignored.
 
 ## Running the Pipeline
 
@@ -20,12 +20,15 @@ Tests require `pytest` (install via `pip install pytest`).
 
 Production runs in Docker on the owner's homelab server. The commands to restart, rebuild, or read logs on that server are in a local `deploy` skill. That skill is not in git.
 
-`docker-compose.yml` is generic. Host settings (DNS, port, Traefik labels and network) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. On the production server, the HomeLab Ansible deploy writes the override. It must never write the tracked `docker-compose.yml`, because a modified tracked file makes `git pull --ff-only` fail.
+Two compose files:
+
+- `examples/compose.yaml` is for a user with no checkout. It uses the image `ghcr.io/unibrain1/thesommelier:4.0` and lists every compose option and every env variable with a comment. A test keeps its variable list in step with the code.
+- `docker-compose.yml` builds the image from a checkout (`build: .`). It is generic. Host settings (DNS, port, Traefik labels and network) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. On the production server, the HomeLab Ansible deploy writes the override. It must never write the tracked `docker-compose.yml`.
 
 The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
-The image holds the code. The container runs no `git` and no `pip install`.
-A code change needs an image rebuild: run `git pull` on the host, then `docker compose build`, then `docker compose down` and `up`.
+The image holds the code. The container runs no `git` and no `pip install`. It does not update itself.
+A code change needs a new image. With the published image, run `docker compose pull`, then `docker compose down` and `up`. From a checkout, rebuild with `docker compose build`, then `docker compose down` and `up`.
 `docker compose restart` does NOT re-run the entrypoint — use `down/up` instead.
 `restart` keeps the stored container config. `down/up` and `run-now` read both compose files when they run.
 
@@ -76,7 +79,7 @@ Implemented in `scripts/generate_plan.py`:
 
 ## Home Assistant Integration
 
-The Home Assistant pull (REST sensors, `HA_ENABLED`) and its troubleshooting steps are in the "Home Assistant" section of `README.md`. Steps for the owner's own server are in the local `deploy` skill, which is not in git.
+The Home Assistant pull (REST sensors, `HA_ENABLED`) and its troubleshooting steps are in `docs/home-assistant.md`. Steps for the owner's own server are in the local `deploy` skill, which is not in git.
 
 ## Deployment Gotchas
 

@@ -29,7 +29,7 @@ from tests.helpers import (
     build_header_only_tsv,
     build_ics,
     build_inventory_tsv,
-    readme_rest_sensors,
+    ha_rest_sensors,
 )
 
 REPO = Path(__file__).resolve().parent.parent
@@ -737,7 +737,7 @@ def test_readme_sensor_attributes_exist_in_the_json(harness):
     ]
     meal_keys = set().union(*suggestions)
 
-    sensors = readme_rest_sensors()
+    sensors = ha_rest_sensors()
     assert [Path(s["resource"]).name for s in sensors] == [
         "thisweek.json",
         "today.json",

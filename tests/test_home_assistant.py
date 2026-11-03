@@ -21,6 +21,7 @@ def _checked_files() -> list[Path]:
             "Dockerfile",
             "docker-compose.yml",
             "docker-compose.override.yml.sample",
+            "examples/compose.yaml",
             ".env.sample",
         )
     ]

@@ -6,326 +6,87 @@
 
 ![The Sommelier](docs/images/screenshot.png)
 
-Don't let good wine go to waste. The Sommelier is your personal wine advisor — it connects to your [CellarTracker](https://www.cellartracker.com) cellar and generates a 52-week drinking plan that prioritizes bottles past their peak or nearing the end of their drinking window. It fits wines to seasons, anchors special bottles to holidays, and reads your meal plan from Google Calendar to suggest specific pairings from your cellar. Claude adds contextual tasting notes for every bottle. The pipeline runs every 30 minutes during the day in a Docker container and publishes a self-updating web app — so your plan always reflects what's actually in your cellar.
+The Sommelier reads your [CellarTracker](https://www.cellartracker.com) cellar and makes a 52-week drinking plan. It reads your meal plan from Google Calendar and suggests pairings from your cellar. Claude writes a tasting note for each bottle. A sync runs every 30 minutes during the day in a Docker container and publishes a web app. The plan follows the changes in your cellar.
 
-## How It Works
+## Features
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  FETCH (scripted)                                       │
-│    CellarTracker inventory + notes + food tags           │
-│    Google Calendar menu                                 │
-├─────────────────────────────────────────────────────────┤
-│  GENERATE PLAN (scripted — rules-based)                 │
-│    52-week plan: priority, season, evolution, holidays   │
-├─────────────────────────────────────────────────────────┤
-│  GENERATE NOTES (LLM — Claude Code CLI)                 │
-│    Contextual tasting notes, augmented with CT data      │
-├─────────────────────────────────────────────────────────┤
-│  COMPARE & PAIR (scripted)                              │
-│    Inventory diff + food-wine pairing suggestions        │
-├─────────────────────────────────────────────────────────┤
-│  PUBLISH (atomic)                                       │
-│    Complete plan with notes → site/                      │
-└─────────────────────────────────────────────────────────┘
-```
-
-The plan regenerates from scratch every run. CellarTracker is the system of record for all wine metadata. Claude generates tasting notes. Everything else is deterministic.
-
-## How Wines Are Prioritized
-
-The plan generator scores every bottle in your cellar and schedules the 52 most desirable wines — one per week. Each wine receives a **composite score** that blends four factors, each normalized to 0–100:
-
-```
-composite = 100 - (0.50 × window + 0.25 × season + 0.15 × diversity + 0.10 × quality)
-```
-
-Lower composite = schedule sooner. The four factors:
-
-### Drinking window (50%)
-
-The most important factor. A continuous score based on where the current year falls relative to a wine's Begin/EndConsume dates from CellarTracker.
-
-- **Past peak** — Scores 75–100. These wines are fading — open them now while there's still a chance. The further past peak, the more urgent. A wine 6+ years past its window scores the maximum 100.
-- **In window** — Scores 30–56. A bell curve centered on the midpoint of the drinking window, blended with end-of-window urgency. Wines near the sweet spot of their window score highest. Wines that just entered their window score lowest within this range.
-- **Before window** — Scores 0–10. Not ready yet. Wines 3+ years from their window score 0.
-- **No data** — Scores 35 (neutral). Treated as moderate urgency.
-
-### Seasonal fit (25%)
-
-Matches wine style to the time of year. Sparkling, rosé, and whites are preferred in spring and summer. Bold reds (Cabernet, Syrah, Barolo, Nebbiolo) are steered to fall and winter. Light reds like Pinot Noir and Gamay work year-round. A perfect seasonal match scores 100, a poor fit scores 0.
-
-### Diversity (15%)
-
-Prevents monotony. Scheduling the same wine, same producer, or same varietal too close together incurs a penalty that decays linearly over 5 weeks:
-
-| Match | Penalty | Example |
-|-------|---------|---------|
-| Same wine | 60 | Two bottles of the same Barolo back-to-back |
-| Same producer | 35 | Two Domaine Drouhin wines in 3 weeks |
-| Same varietal | 20 | Cabernet in weeks 40 and 41 |
-
-Only the strongest matching tier fires per comparison, but penalties accumulate across multiple nearby wines.
-
-### CT quality score (10%)
-
-CellarTracker's community rating, normalized so that CT 80 = 0 and CT 100 = 100. Higher-rated wines get a slight boost. Wines without a rating default to the community average (~88). This is the lightest weight — urgency and seasonal fit matter far more than ratings.
-
-### Scheduling phases
-
-The plan is built in three phases to ensure the most urgent bottles get placed first:
-
-1. **Phase A (weeks 1–8)** — Only past-peak and expiring wines are eligible
-2. **Phase B (weeks 9–16)** — Expiring-soon wines join the pool
-3. **Phase C (weeks 17–52)** — All remaining wines compete by composite score
-
-Evolution tracks and holiday anchors are pre-reserved before the main scheduling loop, so they always get their preferred weeks.
-
-### Automatic hold-back rules
-
-Some bottles are never scheduled, even if they score well:
-
-- **Long-ager hold**: any bottle where `BeginConsume > current year + 2` is not scheduled
-- **Quantity hold-back**: if you have 3+ bottles of the same wine, at most `quantity - 2` are scheduled (minimum 1)
-
-## The Sommelier: Food-Wine Pairing
-
-The pairing engine matches your meal plan against your cellar and suggests wines for upcoming meals. Suggestions prioritize bottles that need drinking soon. Each meal gets a unique suggestion, and the system is varietal-aware — it looks up inventory data for planned wines to improve matching accuracy.
-
-Three outcomes per meal:
-- **Pairs Well** (green) — A good match for the meal
-- **Sommelier Pick** (blue) — An exceptional pairing from your cellar
-- **No Match** (muted) — The meal doesn't pair well with available wines, or inventory is unavailable
-
-For tips on writing meal plan entries that produce the best pairing suggestions, see [Menu Guide](docs/menu-guide.md).
+- **Drinking plan** — One bottle a week for 52 weeks, ranked by drinking window, season, variety and CellarTracker rating. [How it works](docs/how-it-works.md)
+- **Seasons and holidays** — Light wines for spring and summer, bold reds for fall and winter, special bottles on your holidays. [Plan configuration](docs/plan-configuration.md)
+- **Food-wine pairing** — One suggestion from your cellar for each meal in your Google Calendar. [Pairing](docs/how-it-works.md#food-wine-pairing), [Menu Guide](docs/menu-guide.md)
+- **Claude tasting notes** — A short note for each bottle. The container logs in with a token, not an API key. [Claude login](docs/features.md#claude-login)
+- **Morning digest** — An email that names the wine to open with today's meal. [Digest email](docs/features.md#morning-digest-email)
+- **Home Assistant** — REST sensors for the wine of the week and today's pairing. [Home Assistant](docs/home-assistant.md)
+- **Healthchecks.io** — Each sync pings your check. [Healthchecks.io ping](docs/features.md#healthchecksio-ping)
 
 ## Quick Start
 
-### Prerequisites
+### Run with Docker
 
-- Python 3.12+
-- A [CellarTracker](https://www.cellartracker.com) account
-- A Google Calendar with meal plans — see [Menu Plan Setup](#menu-plan-setup)
-- [1Password CLI](https://developer.1password.com/docs/cli/) (`op`) — optional, only to run `op run` with secret references, see [Configuration](#configuration)
-- [Paprika](https://www.paprikaapp.com) — optional, syncs meal plans to Google Calendar
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude`) — optional, for tasting notes. The notes run only when `CLAUDE_CODE_OAUTH_TOKEN` is set, also on a local run with a logged-in CLI
+You need Docker with Compose, a [CellarTracker](https://www.cellartracker.com) account, and the secret `.ics` URL of a Google Calendar with your meal plans (see [Menu plan setup](docs/menu-plan.md)). You do not need the repo.
 
-### Setup
+1. Make a folder. Download the sample compose file:
+
+   ```bash
+   mkdir the-sommelier && cd the-sommelier
+   curl -fsSLo compose.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/examples/compose.yaml
+   ```
+
+2. Optional: set your own holidays and evolution tracks. Download the plan sample, and change it for your cellar (see [Plan configuration](docs/plan-configuration.md)). Without `config/plan.yaml`, the plan uses the default holidays and no evolution tracks.
+
+   ```bash
+   mkdir config
+   curl -fsSLo config/plan.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/plan.yaml.sample
+   ```
+
+3. Make a `.env` file next to `compose.yaml` for the three required variables. Run `chmod 600 .env`.
+
+   ```bash
+   USERNAME=your_cellartracker_username
+   PASSWORD=your_cellartracker_password
+   GOOGLE_CALENDAR_ICS_URL=https://calendar.google.com/calendar/ical/example/private-token/basic.ics
+   ```
+
+   A variable in the shell environment overrides the same variable in `.env`. Windows always sets `USERNAME`. There, set it in the shell before you start the container: `$env:USERNAME='your_cellartracker_username'; docker compose up -d`.
+
+   To use an optional feature, remove the `# ` from its lines in `compose.yaml`. Put each secret (a line with `${NAME}`) in `.env`. Edit the other optional values in `compose.yaml`. See [Configuration](docs/configuration.md).
+4. Start the container:
+
+   ```bash
+   docker compose up -d
+   ```
+
+5. Open `http://localhost:8080`. The first run takes longer when the Claude notes are on, because Claude writes a note for each bottle. Until the first run ends, the site shows no plan.
+
+The site has no login. It serves your menu and `report.json`, which holds your cellar value. Port 8080 binds all host interfaces. To limit the site to the host, use `127.0.0.1:8080:8080` in `ports`.
+
+To run a sync now, without waiting for the schedule:
 
 ```bash
-pip install -r requirements.txt
-cp .env.sample .env
-cp config/plan.yaml.sample config/plan.yaml
-# Edit .env with your values (see Configuration)
-# Edit config/plan.yaml with your holidays and evolution tracks
-```
-
-### Run
-
-```bash
-bash fetch.sh
-# Serve the site:
-python3 -m http.server -d site 8080
-```
-
-### Docker (Homelab)
-
-```bash
-# First time, or after any code change: pull the code, then rebuild the image
-git pull
-docker compose build
-docker compose down && docker compose up -d
-
-# Settings change only: no rebuild needed
-docker compose down && docker compose up -d
-
-# One-shot test run
 docker compose run --rm run-now
 ```
 
-Container: `the-sommelier`. Schedule configurable via `SYNC_SCHEDULE` env var (one or more cron expressions, separated by `;`). The default runs every 30 minutes from 6am to 10pm Pacific, so CellarTracker and Paprika changes show up within 30 minutes.
+### Update
 
-The image holds the code. The container does not run `git` or `pip install`. A code change needs a new image, so rebuild it.
-
-Volumes:
-
-- `sommelier-data` is a named volume at `/data`. It holds the plan, the caches, the digest state and the published site files.
-- `./config:/config:ro` is a read-only bind mount. Put `plan.yaml` in the `./config` folder on the host.
-
-Only `/data` and `/tmp` are writable. The root file system is read-only.
-
-The container runs as `user: "1000:1000"`, not as root. The container also sets `read_only: true`, `cap_drop: ALL` and `no-new-privileges`. A bind mount for `/data` must be writable by UID 1000.
-
-The image has a Docker health check. Run `docker inspect` to see the state. The check passes when nginx serves `index.html` and the published `plan.json` is recent. `HEALTH_MAX_AGE_MINUTES` sets the age limit. The setting is optional and the default is 600.
-
-`docker-compose.yml` is generic. It publishes no port. Put the settings for your host in `docker-compose.override.yml`, which git ignores. Docker Compose reads it automatically when you do not use `-f`. To start, copy the sample:
+A new release is a new image. The container does not update itself.
 
 ```bash
-cp docker-compose.override.yml.sample docker-compose.override.yml
+docker compose pull
+docker compose down && docker compose up -d
 ```
-
-Then replace the placeholders: DNS servers, the reverse proxy host name, and the published port. Compose adds `dns` and `ports` to the lists in the base file, so set them in the override only.
-
-## Home Assistant
-
-Home Assistant pulls `thisweek.json` and `today.json` from the site with REST sensors. The container needs no Home Assistant credentials, no SSH key and no access to the Home Assistant file system.
-
-The feature is off by default. To turn it on, set `HA_ENABLED=true` in `.env`. Each pipeline run then writes both files to the site folder. When the feature is off, the pipeline removes both files and logs "Skipping Home Assistant JSON". `HA_ENABLED=false` and a value that is not valid also keep the feature off. `python3 scripts/settings.py check` shows the state.
-
-The site serves the files as `application/json` at these URLs:
-
-- `https://<site host>/thisweek.json`: the wine for the current week.
-- `https://<site host>/today.json`: the meal and the pairing for today. The `meal` field is `null` when no meal is planned.
-
-Add this to `configuration.yaml` in Home Assistant. Replace `<site host>` with the host name of your site.
-
-```yaml
-rest:
-  - resource: https://<site host>/thisweek.json
-    scan_interval: 1800
-    sensor:
-      - name: Sommelier this week
-        value_template: "{{ value_json.name }}"
-        json_attributes:
-          - vintage
-          - badge
-          - date
-          - note
-          - location
-          - window
-  - resource: https://<site host>/today.json
-    scan_interval: 1800
-    sensor:
-      - name: Sommelier today
-        value_template: "{{ value_json.meal | default('No meal planned', true) }}"
-        json_attributes:
-          - date
-          - planned_wine
-          - planned_vintage
-          - suggested_bottle
-          - pairing
-```
-
-With the default `SYNC_SCHEDULE` (every 30 minutes, 06:00–22:00 Pacific), the files change at most each 1800 seconds, so a `scan_interval` below 1800 gives no new data. If you change `SYNC_SCHEDULE`, change `scan_interval` to match. Use `http://` only on a trusted local network.
-
-### Move from the SSH push
-
-1. Set `HA_ENABLED=true` in `.env`.
-2. Restart the container with `docker compose down && docker compose up -d`. A `restart` keeps the old environment.
-3. In `configuration.yaml`, change the `resource` of each sensor from the local URL of the `/config/www` files to the two URLs above.
-4. Go to Developer Tools → Actions and run `rest.reload`.
-5. Remove `HA_SSH_TARGET` from `.env`. Remove the `ha_ssh_key` mount from `docker-compose.override.yml`.
-6. Delete `thisweek.json` and `today.json` from `/config/www` on the Home Assistant host.
-7. On the Home Assistant host, remove the public half of the push key from `authorized_keys`, and remove the `sudo` rule that let that user run `tee`. On the Docker host, delete the private key file.
-
-### Troubleshooting
-
-- To make Home Assistant read the files now, go to Developer Tools → Actions and run `rest.reload`.
-- If a URL gives 404, check that `HA_ENABLED=true` is in the container environment and that the last pipeline run did not skip the files.
-- If a sensor shows `unavailable` and the log has "WARNING: thisweek.py failed" or "WARNING: today.py failed", the script failed and the pipeline removed the file. Read the log to find the cause, then run the pipeline again.
-- If a sensor shows `unknown`, open the URL in a browser and compare the field names with `value_template` and `json_attributes`.
-
-## Healthchecks.io
-
-Each pipeline run pings Healthchecks.io at the end. A successful run pings the `the-sommelier` check. A failed run pings `/fail`. The ping runs only when `HEALTHCHECK_PING_KEY` is set and `HEALTHCHECK_ENABLED` is not set to `false` or to a value that is not valid. The ping goes to `<HEALTHCHECK_BASE_URL>/<HEALTHCHECK_PING_KEY>/<HEALTHCHECK_SLUG>`. `HEALTHCHECK_SLUG` defaults to `the-sommelier`. `HEALTHCHECK_BASE_URL` defaults to `https://hc-ping.com`.
-
-The check schedule on Healthchecks.io must match `SYNC_SCHEDULE`. If it does not match, the check reports "down" when no run is due. For the default schedule, use these settings:
-
-- Schedule type: Cron
-- Expression: `*/30 6-21 * * *`
-- Time zone: `America/Los_Angeles`
-- Grace time: 45 minutes
-
-Healthchecks.io accepts only one cron expression. The 22:00 run sends one extra ping, which has no effect. If you change `SYNC_SCHEDULE`, change the check schedule in the same change.
-
-## Menu Plan Setup
-
-The pipeline reads your meal plan from a Google Calendar via its secret .ics URL. You can populate the calendar manually or use a recipe manager like [Paprika](https://www.paprikaapp.com).
-
-### Using Paprika (recommended)
-
-[Paprika](https://www.paprikaapp.com) is a recipe manager that can sync meal plans to Google Calendar.
-
-1. In Paprika, go to **Settings → Calendar → Google Calendar**
-2. Sign in with your Google account and select or create a calendar (e.g., "Menu Plan")
-3. Plan your meals in Paprika's meal planner — they'll sync automatically to the calendar
-
-### Using any calendar
-
-You can also add meal events directly to any Google Calendar. Name each event after the meal (e.g., "Grilled Lamb Chops"). See [Menu Guide](docs/menu-guide.md) for tips on writing entries that produce the best pairing suggestions.
-
-### Getting the calendar .ics URL
-
-1. Open [Google Calendar](https://calendar.google.com) in a browser
-2. Click the **⋮** menu next to your meal plan calendar → **Settings and sharing**
-3. Scroll to **Integrate calendar**
-4. Copy the **Secret address in iCal format** — it looks like:
-   ```
-   https://calendar.google.com/calendar/ical/...%40group.calendar.google.com/private-.../basic.ics
-   ```
-5. Add it to your `.env` as `GOOGLE_CALENDAR_ICS_URL`
-
-## Plan Configuration
-
-The plan reads holidays and evolution tracks from a YAML file. `PLAN_CONFIG` sets the path. The default is `/config/plan.yaml`, and `bash fetch.sh` uses `config/plan.yaml` in the repo. Copy `config/plan.yaml.sample` to that path and change it for your cellar. Git ignores `config/plan.yaml`.
-
-If the file is missing, the plan uses the five holidays of the sample and no evolution tracks, and the run logs a note. If a field is not valid, the run stops with an error that names the field, for example `evolution_tracks[0].prefered_month: unknown field`.
-
-### Holidays
-
-Anchor special bottles to dates that matter to you. The plan generator finds the nearest week and assigns a high-score bottle. If the file has no `holidays` key, the plan uses the default holidays. `holidays: []` gives no holidays.
-
-```yaml
-holidays:
-  - name: Thanksgiving
-    month: 11
-    day: 26
-  - name: Anniversary   # your date
-    month: 6
-    day: 15
-```
-
-### Evolution Tracks
-
-Track how a specific wine develops across vintages by opening one bottle per year. The generator picks the most urgent vintage within the drinking window and schedules it in your preferred month.
-
-```yaml
-evolution_tracks:
-  - label: Laurène              # display name
-    name_fragment: laurène      # matched against inventory wine names
-    season_months: [10, 11]     # fallback months when the preferred week is taken; start must not be after end
-    preferred_month: 11         # ideally November
-```
-
-### Upgrade from plan_config.py
-
-Before v4.0.0 the settings were in `scripts/plan_config.py`. Convert that file one time:
-
-```bash
-python3 scripts/convert_plan_config.py scripts/plan_config.py config/plan.yaml
-```
-
-The script drops `occasion_template`, which the plan generator never used. It does not write over a file that exists.
-
-If an evolution track falls on the same week as a holiday (e.g., Laurène in November near Thanksgiving), the occasions merge — the card shows both.
-
-## Configuration
-
-The pipeline reads all settings from environment variables. `.env.sample` lists every variable. Copy it to `.env` and set plain values.
-
-Three variables are required: `USERNAME`, `PASSWORD` and `GOOGLE_CALENDAR_ICS_URL`. If one is missing, empty, or starts with `op://`, the run stops with an error that names the variable.
-
-Each optional feature turns on when all its settings are present and valid (`.env.sample` lists the rules). Set `<FEATURE>_ENABLED=false` to turn it off. An empty or unknown flag value also turns it off and logs a warning. The features are the digest email, Claude tasting notes, community notes and the Healthchecks.io ping. The Home Assistant files are the exception: they need `HA_ENABLED=true` and have no other setting. Each run logs the state of each feature.
-
-Choose how the values reach the pipeline:
-
-- Plain values in `.env`: run `bash fetch.sh`. The script reads `.env` unless `USERNAME`, `PASSWORD` and `GOOGLE_CALENDAR_ICS_URL` are all already set.
-- 1Password references in `.env`: run `op run --env-file=.env -- bash fetch.sh`. `op run` replaces each `op://` value before the script starts.
-- Docker: compose passes the values with `env_file: .env`. `fetch_docker.sh` does not read `.env`.
-
-Do not commit `.env`. Git ignores it.
 
 ## Documentation
 
-- [CLAUDE.md](CLAUDE.md) — Project conventions, pipeline architecture, deployment gotchas
-- [docs/menu-guide.md](docs/menu-guide.md) — How to write menu entries for best pairings
+| Page | Content |
+| --- | --- |
+| [Configuration](docs/configuration.md) | Flag and secret rules, and a table of every environment variable. |
+| [Optional features](docs/features.md) | Schedules, digest email, Claude notes and login, community notes, Healthchecks.io, health check. |
+| [Home Assistant](docs/home-assistant.md) | REST sensors for the wine of the week and today's pairing. |
+| [Menu plan setup](docs/menu-plan.md) | Get your meal plan from Google Calendar. |
+| [Menu Guide](docs/menu-guide.md) | Write menu entries for the best pairings. |
+| [Plan configuration](docs/plan-configuration.md) | Holidays and evolution tracks in `plan.yaml`. |
+| [The container](docs/the-container.md) | The sync, your files, and the health check. |
+| [Upgrade from v3.x](docs/upgrade-from-v3.md) | Move from a v3.x checkout to the image. |
+| [How it works](docs/how-it-works.md) | The sync steps, the ranking of wines, and the pairing. |
+| [Run from a checkout](docs/running-from-a-checkout.md) | Develop, or build the image yourself. |
+| [Suggestions](docs/suggestions.md) | Optional tips, such as 1Password. |
+| [CLAUDE.md](CLAUDE.md) | Project conventions and deployment notes. |
