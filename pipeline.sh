@@ -135,25 +135,15 @@ cp "${DATA_DIR}/plan.json" "${SITE_DIR}/plan.json"
 cp "${DATA_DIR}/pairing_suggestions.json" "${SITE_DIR}/pairing_suggestions.json"
 cp "${DATA_DIR}/report.json" "${SITE_DIR}/report.json"
 
-# --- GENERATE HOME ASSISTANT JSON ---
-log "==> Generating Home Assistant JSON..."
-python3 scripts/thisweek.py "${DATA_DIR}/plan.json" > "${SITE_DIR}/thisweek.json" || log "WARNING: thisweek.py failed"
-python3 scripts/today.py "${DATA_DIR}/pairing_suggestions.json" > "${SITE_DIR}/today.json" || log "WARNING: today.py failed"
-
-# --- PUSH TO HOME ASSISTANT ---
-HA_SSH_KEY="/run/secrets/ha_ssh_key"
-if [[ -n "${HA_SSH_TARGET:-}" ]] && [[ -f "${HA_SSH_KEY}" ]]; then
-  log "==> Pushing to Home Assistant (${HA_SSH_TARGET})..."
-  HA_SSH_OPTS="-i ${HA_SSH_KEY} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
-  # shellcheck disable=SC2086
-  if ssh ${HA_SSH_OPTS} "${HA_SSH_TARGET}" "sudo tee /config/www/thisweek.json > /dev/null" < "${SITE_DIR}/thisweek.json" \
-    && ssh ${HA_SSH_OPTS} "${HA_SSH_TARGET}" "sudo tee /config/www/today.json > /dev/null" < "${SITE_DIR}/today.json"; then
-    log "    Pushed thisweek.json + today.json to Home Assistant"
-  else
-    log "WARNING: Failed to push JSON to Home Assistant"
-  fi
+# --- HOME ASSISTANT JSON (Home Assistant pulls it with a REST sensor) ---
+if python3 scripts/settings.py enabled home_assistant; then
+  log "==> Generating Home Assistant JSON..."
+  python3 scripts/thisweek.py "${DATA_DIR}/plan.json" > "${SITE_DIR}/thisweek.json" || log "WARNING: thisweek.py failed"
+  python3 scripts/today.py "${DATA_DIR}/pairing_suggestions.json" > "${SITE_DIR}/today.json" || log "WARNING: today.py failed"
 else
-  log "    Skipping Home Assistant push — HA_SSH_TARGET or SSH key not configured"
+  # A copy from an earlier run would look current to a sensor that still polls.
+  rm -f "${SITE_DIR}/thisweek.json" "${SITE_DIR}/today.json"
+  log "    Skipping Home Assistant JSON — home_assistant feature is off"
 fi
 
 # --- GENERATE DIGEST ---

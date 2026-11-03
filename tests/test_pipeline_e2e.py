@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass, field
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from tests.helpers import (
     build_header_only_tsv,
     build_ics,
     build_inventory_tsv,
+    readme_rest_sensors,
 )
 
 REPO = Path(__file__).resolve().parent.parent
@@ -245,8 +247,6 @@ def _assert_site_files(site: Path) -> None:
         "plan.json",
         "pairing_suggestions.json",
         "report.json",
-        "thisweek.json",
-        "today.json",
     ):
         assert (site / name).is_file(), f"{name} is missing in {site}"
 
@@ -675,3 +675,76 @@ def test_pipeline_claude_gate_off_without_token_even_with_cli(harness):
     assert result.returncode == 0, _output(result)
     assert "Claude feature is off" in result.stdout
     assert "Generating tasting notes" not in result.stdout
+
+
+# --- Home Assistant REST sensor files ------------------------------------
+
+
+def _run_script(harness: Harness, script: str, *args: str) -> str:
+    result = subprocess.run(
+        [sys.executable, f"scripts/{script}", *args],
+        cwd=harness.app,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, _output(result)
+    return result.stdout
+
+
+def test_ha_enabled_makes_thisweek_and_today(harness):
+    result = harness.run("fetch_docker.sh", extra={"HA_ENABLED": "true"})
+
+    assert result.returncode == 0, _output(result)
+    site = Path(harness.env["SITE_DIR"])
+    assert "Generating Home Assistant JSON" in result.stdout
+    expected_week = _run_script(harness, "thisweek.py", str(site / "plan.json"))
+    assert json.loads((site / "thisweek.json").read_text()) == json.loads(expected_week)
+    today = json.loads((site / "today.json").read_text())
+    assert today["date"] == date.today().isoformat()
+
+
+def test_readme_sensor_attributes_exist_in_the_json(harness):
+    """A renamed field would make a sensor show unknown, with no error."""
+    result = harness.run("fetch_docker.sh", extra={"HA_ENABLED": "true"})
+    assert result.returncode == 0, _output(result)
+    site = Path(harness.env["SITE_DIR"])
+    week = json.loads((site / "thisweek.json").read_text())
+    # today.json holds one entry of pairing_suggestions.json, or a date and null.
+    meal = json.loads((site / "pairing_suggestions.json").read_text())["suggestions"][0]
+
+    sensors = readme_rest_sensors()
+    assert [Path(s["resource"]).name for s in sensors] == [
+        "thisweek.json",
+        "today.json",
+    ]
+    for sensor, entry in zip(sensors, (week, meal)):
+        attributes = sensor["sensor"][0]["json_attributes"]
+        # pairing.py adds suggested_bottle only when the planned wine pairs badly.
+        missing = set(attributes) - set(entry) - {"suggested_bottle"}
+        assert not missing, f"{sensor['resource']}: {sorted(missing)}"
+
+
+def test_ha_off_by_default_makes_no_files_and_logs_skip(harness):
+    result = harness.run("fetch_docker.sh")
+
+    assert result.returncode == 0, _output(result)
+    site = Path(harness.env["SITE_DIR"])
+    assert not (site / "thisweek.json").exists()
+    assert not (site / "today.json").exists()
+    assert "Skipping Home Assistant JSON" in result.stdout
+    assert "Generating Home Assistant JSON" not in result.stdout
+
+
+def test_ha_off_removes_files_from_an_earlier_run(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    (site / "thisweek.json").write_text("{}")
+    (site / "today.json").write_text("{}")
+
+    result = harness.run("fetch_docker.sh", extra={"HA_ENABLED": "false"})
+
+    assert result.returncode == 0, _output(result)
+    assert not (site / "thisweek.json").exists()
+    assert not (site / "today.json").exists()
+    assert "Skipping Home Assistant JSON" in result.stdout
+    _assert_site_files(site)

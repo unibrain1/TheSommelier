@@ -148,31 +148,72 @@ docker compose run --rm run-now
 Container: `the-sommelier`. Schedule configurable via `SYNC_SCHEDULE` env var (one or more cron expressions, separated by `;`). The default runs every 30 minutes from 6am to 10pm Pacific, so CellarTracker and Paprika changes show up within 30 minutes.
 Runs as non-root (configure `user` in docker-compose.yml to match your host UID/GID).
 
-`docker-compose.yml` is generic. It publishes no port and mounts no Home Assistant key. Put the settings for your host in `docker-compose.override.yml`, which git ignores. Docker Compose reads it automatically when you do not use `-f`. To start, copy the sample:
+`docker-compose.yml` is generic. It publishes no port. Put the settings for your host in `docker-compose.override.yml`, which git ignores. Docker Compose reads it automatically when you do not use `-f`. To start, copy the sample:
 
 ```bash
 cp docker-compose.override.yml.sample docker-compose.override.yml
 ```
 
-Then replace the placeholders: DNS servers, the reverse proxy host name, the published port and the SSH key path. Compose adds `dns` and `ports` to the lists in the base file, so set them in the override only.
+Then replace the placeholders: DNS servers, the reverse proxy host name, and the published port. Compose adds `dns` and `ports` to the lists in the base file, so set them in the override only.
 
 ## Home Assistant
 
-Each pipeline run can push `thisweek.json` and `today.json` to Home Assistant. The pipeline copies each file by SSH (`sudo tee`) to `/config/www/` on the Home Assistant host.
+Home Assistant pulls `thisweek.json` and `today.json` from the site with REST sensors. The container needs no Home Assistant credentials, no SSH key and no access to the Home Assistant file system.
 
-The push runs only when both of these are true:
+The feature is off by default. To turn it on, set `HA_ENABLED=true` in `.env`. Each pipeline run then writes both files to the site folder. When the feature is off, the pipeline removes both files and logs "Skipping Home Assistant JSON". `HA_ENABLED=false` and a value that is not valid also keep the feature off. `python3 scripts/settings.py check` shows the state.
 
-- `HA_SSH_TARGET` is set in `.env` (format: `user@host`).
-- An SSH key is mounted into the container at `/run/secrets/ha_ssh_key`. Add this mount in `docker-compose.override.yml` (see the sample file).
+The site serves the files as `application/json` at these URLs:
 
-If either one is missing, the log shows "Skipping Home Assistant push" and the pipeline continues.
+- `https://<site host>/thisweek.json`: the wine for the current week.
+- `https://<site host>/today.json`: the meal and the pairing for today. The `meal` field is `null` when no meal is planned.
 
-Home Assistant reads the two files with REST sensors (`scan_interval: 3600`).
+Add this to `configuration.yaml` in Home Assistant. Replace `<site host>` with the host name of your site.
 
-Troubleshooting:
+```yaml
+rest:
+  - resource: https://<site host>/thisweek.json
+    scan_interval: 1800
+    sensor:
+      - name: Sommelier this week
+        value_template: "{{ value_json.name }}"
+        json_attributes:
+          - vintage
+          - badge
+          - date
+          - note
+          - location
+          - window
+  - resource: https://<site host>/today.json
+    scan_interval: 1800
+    sensor:
+      - name: Sommelier today
+        value_template: "{{ value_json.meal | default('No meal planned', true) }}"
+        json_attributes:
+          - date
+          - planned_wine
+          - planned_vintage
+          - suggested_bottle
+          - pairing
+```
+
+With the default `SYNC_SCHEDULE` (every 30 minutes, 06:00–22:00 Pacific), the files change at most each 1800 seconds, so a `scan_interval` below 1800 gives no new data. If you change `SYNC_SCHEDULE`, change `scan_interval` to match. Use `http://` only on a trusted local network.
+
+### Move from the SSH push
+
+1. Set `HA_ENABLED=true` in `.env`.
+2. Restart the container with `docker compose down && docker compose up -d`. A `restart` keeps the old environment.
+3. In `configuration.yaml`, change the `resource` of each sensor from the local URL of the `/config/www` files to the two URLs above.
+4. Go to Developer Tools → Actions and run `rest.reload`.
+5. Remove `HA_SSH_TARGET` from `.env`. Remove the `ha_ssh_key` mount from `docker-compose.override.yml`.
+6. Delete `thisweek.json` and `today.json` from `/config/www` on the Home Assistant host.
+7. On the Home Assistant host, remove the public half of the push key from `authorized_keys`, and remove the `sudo` rule that let that user run `tee`. On the Docker host, delete the private key file.
+
+### Troubleshooting
 
 - To make Home Assistant read the files now, go to Developer Tools → Actions and run `rest.reload`.
-- If the push fails, make sure that the public half of the mounted key is in `authorized_keys` on the Home Assistant host.
+- If a URL gives 404, check that `HA_ENABLED=true` is in the container environment and that the last pipeline run did not skip the files.
+- If a sensor shows `unknown` and the log has "WARNING: thisweek.py failed" or "WARNING: today.py failed", the file is empty or not valid JSON. Fix the cause in the log, then run the pipeline again.
+- If a sensor shows `unknown`, open the URL in a browser and compare the field names with `value_template` and `json_attributes`.
 
 ## Healthchecks.io
 
@@ -264,7 +305,7 @@ The pipeline reads all settings from environment variables. `.env.sample` lists 
 
 Three variables are required: `USERNAME`, `PASSWORD` and `GOOGLE_CALENDAR_ICS_URL`. If one is missing, empty, or starts with `op://`, the run stops with an error that names the variable.
 
-Each optional feature turns on when all its settings are present and valid (`.env.sample` lists the rules). Set `<FEATURE>_ENABLED=false` to turn it off. An empty or unknown flag value also turns it off and logs a warning. The features are the digest email, Claude tasting notes, community notes and the Healthchecks.io ping. Each run logs the state of each feature.
+Each optional feature turns on when all its settings are present and valid (`.env.sample` lists the rules). Set `<FEATURE>_ENABLED=false` to turn it off. An empty or unknown flag value also turns it off and logs a warning. The features are the digest email, Claude tasting notes, community notes and the Healthchecks.io ping. The Home Assistant files are the exception: they need `HA_ENABLED=true` and have no other setting. Each run logs the state of each feature.
 
 Choose how the values reach the pipeline:
 

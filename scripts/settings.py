@@ -44,6 +44,9 @@ FEATURES: dict[str, tuple[str, tuple[str, ...]]] = {
     "claude": ("CLAUDE_ENABLED", ("CLAUDE_CODE_OAUTH_TOKEN",)),
     "community_notes": ("COMMUNITY_NOTES_ENABLED", ("CT_COMMUNITY_NOTES_RSS",)),
     "healthcheck": ("HEALTHCHECK_ENABLED", ("HEALTHCHECK_PING_KEY",)),
+    # Home Assistant pulls the two JSON files, so the app needs no credentials.
+    # With no settings to check, only the flag can turn the feature on.
+    "home_assistant": ("HA_ENABLED", ()),
 }
 
 # Every variable that this module reads. Tests clear these before each case.
@@ -216,6 +219,10 @@ def feature(name: str) -> FeatureState:
         return FeatureState(name, "bad_flag", f"not valid: {flag}", [flag])
     if flag_value in _FALSE:
         return FeatureState(name, "disabled", f"disabled by {flag}")
+    if not needed:
+        if flag_value in _TRUE:
+            return FeatureState(name, "on")
+        return FeatureState(name, "not_configured", f"set {flag}=true to turn on")
 
     present = [v for v in needed if _present(v)]
     if not present:

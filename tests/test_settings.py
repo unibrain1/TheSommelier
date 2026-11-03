@@ -39,9 +39,13 @@ FEATURES = {
 }
 
 
+# Features with no settings to check. Only the flag can turn them on.
+OPT_IN = {"home_assistant": "HA_ENABLED"}
+
+
 def test_local_feature_list_matches_settings():
     """A feature added to settings.FEATURES needs a case in this file."""
-    assert set(FEATURES) == set(settings.FEATURES)
+    assert set(FEATURES) | set(OPT_IN) == set(settings.FEATURES)
 
 
 REQUIRED_VALUES = {
@@ -709,3 +713,50 @@ def test_op_reference_in_site_url_is_warning(clean_env):
 def test_smtp_port_is_none_when_not_valid(clean_env):
     clean_env.setenv("SMTP_PORT", "abc")
     assert settings.smtp().port is None
+
+
+# --- opt-in features (no settings besides the flag) ---------------------
+
+
+@pytest.mark.parametrize(("name", "flag"), OPT_IN.items())
+class TestOptInFeature:
+    def test_off_when_flag_not_set(self, clean_env, name, flag):
+        state = settings.feature(name)
+        assert state.kind == "not_configured"
+        assert state.on is False
+        assert state.log_line() == f"{name}: off (set {flag}=true to turn on)"
+        assert settings._main(["enabled", name]) == 1
+
+    @pytest.mark.parametrize("value", ["true", "True", "TRUE", "1", "yes", "YES"])
+    def test_on_when_flag_true(self, clean_env, name, flag, value):
+        clean_env.setenv(flag, value)
+        state = settings.feature(name)
+        assert state.on is True
+        assert state.log_line() == f"{name}: on"
+        assert settings._main(["enabled", name]) == 0
+
+    @pytest.mark.parametrize("value", ["false", "False", "0", "no", "NO"])
+    def test_disabled_when_flag_false(self, clean_env, name, flag, value):
+        clean_env.setenv(flag, value)
+        state = settings.feature(name)
+        assert state.kind == "disabled"
+        assert settings._main(["enabled", name]) == 1
+
+    @pytest.mark.parametrize("value", ["maybe", "2", "", "   ", "tru"])
+    def test_bad_flag_value_keeps_feature_off_with_warning(
+        self, clean_env, name, flag, value
+    ):
+        clean_env.setenv(flag, value)
+        state = settings.feature(name)
+        assert state.kind == "bad_flag"
+        assert state.problems == [flag]
+        assert settings._main(["enabled", name]) == 1
+        result = run_cli(["check"], {**REQUIRED_VALUES, flag: value})
+        assert result.returncode == 0
+        assert f"WARNING: {name} is off" in result.stderr
+        assert flag in result.stderr
+
+    def test_check_log_shows_state_when_on(self, clean_env, name, flag):
+        on = run_cli(["check"], {**REQUIRED_VALUES, flag: "true"})
+        assert re.search(rf"^\s*{name}: on$", on.stdout, re.MULTILINE)
+        assert "WARNING" not in on.stdout + on.stderr
