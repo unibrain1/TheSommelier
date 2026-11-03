@@ -5,7 +5,7 @@ session. Each fact is one line: a dash, the key, a colon, and the value in
 backticks. The keys are in
 <https://github.com/unibrain1/devkit/blob/main/docs/project-md.md>.
 
-- test: `python3 -m pytest tests/ -v --tb=short`
+- test: `.venv/bin/python -m pytest tests/ -v --tb=short`
 - lint: `pre-commit run --all-files`
 - plans: `plans`
 - release_notes: `docs/releases/{version}.md`

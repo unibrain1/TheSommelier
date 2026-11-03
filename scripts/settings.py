@@ -36,12 +36,11 @@ from urllib.parse import urlsplit
 
 REQUIRED = ("USERNAME", "PASSWORD", "GOOGLE_CALENDAR_ICS_URL")
 
-# The two Claude keys, one for each mode. The claude CLI prefers the API key
-# when it gets both, so a run would go on the API bill with no signal.
+# The two Claude keys, one for each mode. Exactly one is allowed, so the
+# choice of bill is explicit and not left to the CLI.
 CLAUDE_API_KEY = "ANTHROPIC_API_KEY"
 CLAUDE_OAUTH_TOKEN = "CLAUDE_CODE_OAUTH_TOKEN"
-# The claude CLI also reads this gateway token. It is not a mode, so the
-# subprocess must never get it.
+# Not a mode. The subprocess must never get it.
 UNUSED_ANTHROPIC_VAR = "ANTHROPIC_AUTH_TOKEN"
 CLAUDE_CREDENTIALS = (CLAUDE_API_KEY, UNUSED_ANTHROPIC_VAR, CLAUDE_OAUTH_TOKEN)
 
@@ -132,7 +131,7 @@ class FeatureState:
         return self.kind == "on"
 
     def log_line(self) -> str:
-        # An on feature has a reason only when it has modes (claude).
+        # Only claude sets a reason when on: the mode label.
         if self.on:
             return (
                 f"{self.name}: on ({self.reason})"
@@ -400,7 +399,7 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
             if any(_var_unresolved(v) for v in state.problems):
                 warnings.append(OP_WARNING)
         elif state.kind == "incomplete":
-            # A state with no problem variable to name, such as both Claude keys set.
+            # Only the claude conflict (both keys set) has no problem variable to name.
             warnings.append(f"WARNING: {n} is off ({state.reason}).")
     for var in (*_OTHER_VARS, CLAUDE_API_KEY, CLAUDE_OAUTH_TOKEN):
         if _unresolved(_env(var)) and not any(var in s.problems for s in states):

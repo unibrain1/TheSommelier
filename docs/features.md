@@ -68,7 +68,7 @@ For the subscription, the container logs in with a token. The runs use your Clau
 
 The token expires one year after you make it. After that, the sync continues with empty notes. Make a new token and replace the value.
 
-For the API, put your Anthropic API key in `.env` as `ANTHROPIC_API_KEY`. Remove the `# ` from its line in `compose.yaml`. Then do step 3. The runs go on your API bill.
+For the API, put your Anthropic API key in `.env` as `ANTHROPIC_API_KEY`. Remove the `# ` from its line in `compose.yaml`. Then run `docker compose down && docker compose up -d`. The runs go on your API bill.
 
 ## CellarTracker community notes
 

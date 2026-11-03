@@ -185,8 +185,8 @@ def call_claude(prompt: str) -> str:
             capture_output=True,
             text=True,
             timeout=120,
-            # Only the credential of the chosen mode, so a run cannot go on
-            # the wrong bill.
+            # Only the credential of the chosen mode. Other variables, such as
+            # the CLAUDE_CODE_USE_* provider flags, pass through unchanged.
             env=settings.claude_env(os.environ),
         )
     except subprocess.TimeoutExpired:
@@ -197,8 +197,10 @@ def call_claude(prompt: str) -> str:
         print(f"WARNING: Claude CLI could not start: {e}", file=sys.stderr)
         return ""
     if result.returncode != 0:
+        # The CLI writes auth errors ("Invalid API key") to stdout, not stderr.
+        detail = (result.stderr.strip() or result.stdout.strip())[:300]
         print(
-            f"WARNING: Claude CLI returned {result.returncode}: {result.stderr}",
+            f"WARNING: Claude CLI returned {result.returncode}: {detail}",
             file=sys.stderr,
         )
         return ""
