@@ -323,6 +323,37 @@ def test_valid_smtp_port_boundaries_keep_digest_on(clean_env, port):
     assert settings.smtp().port == int(port)
 
 
+# --- HEALTH_MAX_AGE_MINUTES ----------------------------------------------
+
+
+def test_health_max_age_default_is_600(clean_env):
+    assert settings.health_max_age_minutes() == 600
+
+
+def test_health_max_age_from_env(clean_env):
+    clean_env.setenv("HEALTH_MAX_AGE_MINUTES", "30")
+    assert settings.health_max_age_minutes() == 30
+
+
+def test_check_gives_no_health_max_age_warning_for_valid_value():
+    result = run_cli(["check"], {**REQUIRED_VALUES, "HEALTH_MAX_AGE_MINUTES": "30"})
+    assert "HEALTH_MAX_AGE_MINUTES" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "value", ["0", "-5", "abc", "²", "op://vault/SECRET-canary-health/age"]
+)
+def test_invalid_health_max_age_gives_default_with_warning(clean_env, value):
+    clean_env.setenv("HEALTH_MAX_AGE_MINUTES", value)
+    assert settings.health_max_age_minutes() == 600
+    result = run_cli(["check"], {**REQUIRED_VALUES, "HEALTH_MAX_AGE_MINUTES": value})
+    assert result.returncode == 0
+    assert "WARNING: HEALTH_MAX_AGE_MINUTES is not a positive integer" in result.stderr
+    # A token match, because "0" is part of the default 600 in the warning.
+    leak = re.compile(rf"(?<![\w-]){re.escape(value)}(?!\w)")
+    assert not leak.search(result.stdout + result.stderr)
+
+
 @pytest.mark.parametrize("recipients", [" , ,", ",", "   "])
 def test_recipients_with_only_separators_count_as_missing(clean_env, recipients):
     set_feature(clean_env, "digest")

@@ -1,41 +1,50 @@
 # Generic file. Put host-specific settings (DNS, ports, reverse proxy labels,
-# networks) in docker-compose.override.yml.
+# networks, a bind mount for /data) in docker-compose.override.yml.
 # See docker-compose.override.yml.sample.
+#
+# No DATA_DIR, SITE_DIR or PLAN_CONFIG here: the defaults /data, /data/site
+# and /config/plan.yaml match the volumes below, and nginx reads the run
+# output only from /data/site.
+
+x-sommelier: &sommelier
+  build: .
+  image: the-sommelier:local
+  user: "1000:1000"
+  env_file:
+    - .env
+  environment:
+    TZ: America/Los_Angeles
+  volumes:
+    - sommelier-data:/data
+    - ./config:/config:ro
+  # The code is in the image, and every write goes to /data or /tmp.
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
 services:
   the-sommelier:
-    build: .
+    <<: *sommelier
     container_name: the-sommelier
-    user: "1000:1000"
-    env_file:
-      - .env
     environment:
-      - TZ=America/Los_Angeles
-      # Keep the files in the repo checkout. #112 removes these three lines when
-      # it adds the /data and /config volumes.
-      - DATA_DIR=/app/data
-      - SITE_DIR=/app/site
-      - PLAN_CONFIG=/app/config/plan.yaml
-      - SYNC_SCHEDULE=*/30 6-21 * * *;0 22 * * *
-    volumes:
-      - ./:/app
+      TZ: America/Los_Angeles
+      SYNC_SCHEDULE: "*/30 6-21 * * *;0 22 * * *"
     restart: unless-stopped
 
   run-now:
-    build: .
+    <<: *sommelier
     container_name: the-sommelier-run
-    user: "1000:1000"
-    env_file:
-      - .env
-    environment:
-      - TZ=America/Los_Angeles
-      # Keep the files in the repo checkout. #112 removes these three lines when
-      # it adds the /data and /config volumes.
-      - DATA_DIR=/app/data
-      - SITE_DIR=/app/site
-      - PLAN_CONFIG=/app/config/plan.yaml
-    volumes:
-      - ./:/app
     entrypoint: []
     command: ["bash", "/app/fetch_docker.sh"]
+    # A one-time run serves no site, so the image health check does not apply.
+    healthcheck:
+      disable: true
     profiles:
       - run-now
+
+volumes:
+  sommelier-data:

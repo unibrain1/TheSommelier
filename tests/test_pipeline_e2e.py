@@ -219,7 +219,6 @@ def harness(tmp_path, server) -> Harness:
         "PATH": path,
         "HOME": str(tmp_path / "home"),
         "PYTHONDONTWRITEBYTECODE": "1",
-        "PIPELINE_REEXEC": "1",
         "FAKE_CURL_LOG": str(curl_log),
         "FAKE_CURL_FIXTURES": str(fixtures),
         "USERNAME": FAKE_USER,

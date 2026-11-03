@@ -24,9 +24,8 @@ Production runs in Docker on the owner's homelab server. The commands to restart
 
 The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
-Self-updating: container does `git pull` on startup and before each pipeline run.
-If the startup pull changes `entrypoint.sh`, the entrypoint starts itself again, so one `down/up` is enough. If the pull in `pipeline.sh` brings new commits, the pipeline starts its wrapper again, so the same run uses the new shell code.
-Code changes pushed to GitHub are picked up automatically on next `down/up` or scheduled run.
+The image holds the code. The container runs no `git` and no `pip install`.
+A code change needs an image rebuild: run `docker compose build`, then `docker compose down` and `up`.
 `docker compose restart` does NOT re-run the entrypoint — use `down/up` instead.
 `restart` keeps the stored container config. `down/up` and `run-now` read both compose files when they run.
 
@@ -78,7 +77,6 @@ The Home Assistant pull (REST sensors, `HA_ENABLED`) and its troubleshooting ste
 ## Deployment Gotchas
 
 - Shell scripts must have executable permission in git: `chmod +x *.sh && git add`
-- Docker volume mount requires `git config --global --add safe.directory /app` (handled in entrypoint)
 - Pre-commit hooks (ruff format) may modify files on first commit — re-stage and commit again
 - Claude Code CLI is version-pinned in the Dockerfile — update the pin deliberately when upgrading
 
@@ -88,7 +86,7 @@ The Home Assistant pull (REST sensors, `HA_ENABLED`) and its troubleshooting ste
 - Pairing scores: `"good"`, `"partial"`, `"poor"`, `"neutral"`
 - `pipeline.sh` has all shared logic; `fetch.sh` and `fetch_docker.sh` are thin wrappers
 - Plan is regenerated from scratch every pipeline run — no manual editing of `plan.json`
-- Plan staged to `$DATA_DIR/plan.json`, only published to `$SITE_DIR` when complete with notes. `DATA_DIR` defaults to `/data`. `SITE_DIR` defaults to `$DATA_DIR/site`. `bash fetch.sh` sets them to the `data/` and `site/` folders of the repo. `docker-compose.yml` sets `/app/data`, `/app/site` and `PLAN_CONFIG=/app/config/plan.yaml` until #112.
+- Plan staged to `$DATA_DIR/plan.json`, only published to `$SITE_DIR` when complete with notes. `DATA_DIR` defaults to `/data`. `SITE_DIR` defaults to `$DATA_DIR/site`. `bash fetch.sh` sets them to the `data/` and `site/` folders of the repo. `docker-compose.yml` sets none of them. In the container the defaults `/data`, `/data/site` and `/config/plan.yaml` apply.
 - `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR`, `PLAN_CONFIG` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid, and `<FEATURE>_ENABLED` is not set to false or to a value that is not valid. A feature with no settings (`home_assistant`) turns on only when its flag is a true value (`true`, `1` or `yes`). An `op://` value counts as not resolved.
 - Shared utilities in `scripts/wine_utils.py` — do not duplicate `urgency_score`, `normalize`, `TYPE_TO_BADGE`, or `CURRENT_YEAR` in individual scripts
 - Composite scoring in `scripts/scoring.py` — `composite_score()` combines: window position (50%), seasonal fit (25%), diversity (10%), CT quality (10%), community signals (5%). Lower score = schedule sooner.

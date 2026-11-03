@@ -15,22 +15,6 @@ ping_on_failure() {
 }
 trap ping_on_failure EXIT
 
-# --- SELF-UPDATE ---
-# Bash keeps reading the copies of this file and the wrapper that it opened at
-# start. If the pull brings new commits, start the wrapper again so that the
-# new shell code runs. PIPELINE_REEXEC stops a second pull, so the restart
-# cannot loop. $0 is the wrapper, because the wrapper sources this file.
-if [[ -d .git && -z "${PIPELINE_REEXEC:-}" ]]; then
-  PIPELINE_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-  log "==> Pulling latest from git..."
-  git pull --ff-only 2>&1 || log "WARNING: git pull failed — running with current version"
-  if [[ "$(git rev-parse HEAD 2>/dev/null || echo "changed")" != "${PIPELINE_HEAD}" ]]; then
-    log "==> New commits pulled, starting the pipeline again..."
-    PIPELINE_REEXEC=1 exec bash "$0" "$@"
-  fi
-fi
-unset PIPELINE_REEXEC
-
 # --- SETTINGS ---
 log "==> Checking settings..."
 python3 scripts/settings.py check || { log "ERROR: Settings check failed"; exit 1; }

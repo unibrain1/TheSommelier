@@ -1,0 +1,23 @@
+# Allow list. COPY . /app must not put secrets (.env), personal data
+# (config/plan.yaml, data/, plans/) or run output (site/*.json) in the image.
+# Exclude everything, then add back only what the container runs.
+*
+
+!scripts/*.py
+!*.sh
+!requirements.txt
+!nginx.conf
+
+!site/*.html
+!site/*.css
+!site/*.png
+!site/*.ico
+
+# Run output that a local pipeline run writes into site/. In the container it
+# comes from /data/site.
+site/*.json
+site/digest.html
+
+# Git-ignored v3 plan settings with personal data. convert_plan_config.py
+# reads it on the host only.
+scripts/plan_config.py
