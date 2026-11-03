@@ -8,6 +8,7 @@ config/plan.yaml
 data/
 
 # Python
+.venv/
 __pycache__/
 *.pyc
 

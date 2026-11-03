@@ -14,7 +14,11 @@ bash fetch.sh
 
 ## Running Tests
 
-Tests require `pytest` (install via `pip install pytest`).
+Tests run from the virtual environment in `.venv` (see `docs/running-from-a-checkout.md`). The system Python can be without `pytest`.
+
+```bash
+.venv/bin/python -m pytest tests/ -v --tb=short
+```
 
 ## Docker Deployment
 

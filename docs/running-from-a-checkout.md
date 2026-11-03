@@ -17,8 +17,12 @@ Use a checkout to develop, or to build the image yourself. To run the published 
 
 ## Set up and run
 
+The scripts run `python3`. Make a virtual environment in `.venv`, so that `python3` finds the packages when the environment is active:
+
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt pytest
 cp .env.sample .env
 cp config/plan.yaml.sample config/plan.yaml
 # Edit .env with your values (see docs/configuration.md)
