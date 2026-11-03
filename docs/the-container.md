@@ -1,0 +1,16 @@
+# The container
+
+What the container does, which files it keeps, and how to keep them in a host folder.
+
+[Back to the README](../README.md)
+
+The container runs a sync on a schedule. A sync fetches your CellarTracker cellar and your menu, builds the plan, and updates the site. See [Scheduling](features.md#scheduling) for the times.
+
+Your files:
+
+- `sommelier-data` is a Docker volume. It keeps the plan, the saved notes and the site. Keep it to keep your history.
+- The `config` folder next to `compose.yaml` holds your optional `plan.yaml`.
+
+To keep the data in a host folder instead of a volume, follow the comments in `compose.yaml`. Use the same folder for both services, and let user 1000 write to it.
+
+For the health check, see [Container health check](features.md#container-health-check).

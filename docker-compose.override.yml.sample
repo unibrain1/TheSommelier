@@ -1,13 +1,14 @@
-# Optional host-specific settings for docker-compose.yml.
+# Optional host-specific settings for docker-compose.yml, which builds the
+# image from a checkout. To run the published image with no checkout, use
+# examples/compose.yaml instead.
 #
 # To use this file:
 #   1. Copy it to docker-compose.override.yml (git ignores that file).
 #   2. Replace each placeholder.
 #   3. Remove the parts that you do not need.
 #
-# Docker Compose reads docker-compose.override.yml automatically when you do
-# not use -f. It adds "dns" and "ports" to the lists in docker-compose.yml, so
-# set these keys in this file only.
+# Compose adds "dns" and "ports" to the lists in docker-compose.yml, so set
+# these keys in this file only.
 services:
   the-sommelier:
     dns:
