@@ -17,7 +17,9 @@ gives the default, and check logs a warning.
 
 A feature turns on when all its settings are present and valid. A feature with
 no settings (home_assistant) turns on only when its <FEATURE>_ENABLED flag is a
-true value.
+true value. The claude feature has no flag. It turns on when exactly one of
+ANTHROPIC_API_KEY (API key mode) and CLAUDE_CODE_OAUTH_TOKEN (subscription
+mode) is set.
 
 Each function reads os.environ when it is called, not at import, so tests can
 change the environment with monkeypatch.
@@ -26,17 +28,29 @@ change the environment with monkeypatch.
 import os
 import re
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
 REQUIRED = ("USERNAME", "PASSWORD", "GOOGLE_CALENDAR_ICS_URL")
-ANTHROPIC_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+# The two Claude keys, one for each mode. The claude CLI prefers the API key
+# when it gets both, so a run would go on the API bill with no signal.
+CLAUDE_API_KEY = "ANTHROPIC_API_KEY"
+CLAUDE_OAUTH_TOKEN = "CLAUDE_CODE_OAUTH_TOKEN"
+# The claude CLI also reads this gateway token. It is not a mode, so the
+# subprocess must never get it.
+UNUSED_ANTHROPIC_VAR = "ANTHROPIC_AUTH_TOKEN"
+CLAUDE_CREDENTIALS = (CLAUDE_API_KEY, UNUSED_ANTHROPIC_VAR, CLAUDE_OAUTH_TOKEN)
 
 # The SSH push to Home Assistant was removed in v4.0.0. A host that still sets
 # this variable would otherwise see frozen sensors with no signal.
 REMOVED_HA_VAR = "HA_SSH_TARGET"
+# The key now turns the claude feature on. A host that still sets the flag to
+# false would otherwise get notes it thinks are off, with no signal.
+REMOVED_CLAUDE_VAR = "CLAUDE_ENABLED"
 
 DEFAULT_DATA_DIR = "/data"
 DEFAULT_PLAN_CONFIG = "/config/plan.yaml"
@@ -47,13 +61,14 @@ DEFAULT_HC_BASE_URL = "https://hc-ping.com"
 # The 8-hour night gap of the default schedule, plus 2 hours.
 DEFAULT_HEALTH_MAX_AGE_MINUTES = 600
 
-# feature -> (enable flag, settings that must be present)
-FEATURES: dict[str, tuple[str, tuple[str, ...]]] = {
+# feature -> (enable flag, settings that must be present). The claude feature
+# has no flag and its own rule in _claude_state().
+FEATURES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "digest": (
         "DIGEST_ENABLED",
         ("SMTP_USERNAME", "SMTP_PASSWORD", "DIGEST_RECIPIENTS"),
     ),
-    "claude": ("CLAUDE_ENABLED", ("CLAUDE_CODE_OAUTH_TOKEN",)),
+    "claude": (None, (CLAUDE_API_KEY, CLAUDE_OAUTH_TOKEN)),
     "community_notes": ("COMMUNITY_NOTES_ENABLED", ("CT_COMMUNITY_NOTES_RSS",)),
     "healthcheck": ("HEALTHCHECK_ENABLED", ("HEALTHCHECK_PING_KEY",)),
     # Home Assistant pulls the two JSON files, so the app needs no credentials.
@@ -64,7 +79,7 @@ FEATURES: dict[str, tuple[str, tuple[str, ...]]] = {
 # Every variable that this module reads. Tests clear these before each case.
 ALL_VARS: tuple[str, ...] = (
     *REQUIRED,
-    *(v for flag, needed in FEATURES.values() for v in (flag, *needed)),
+    *(v for flag, needed in FEATURES.values() for v in (flag, *needed) if v),
     "DATA_DIR",
     "SITE_DIR",
     "PLAN_CONFIG",
@@ -75,8 +90,9 @@ ALL_VARS: tuple[str, ...] = (
     "HEALTHCHECK_SLUG",
     "HEALTHCHECK_BASE_URL",
     "HEALTH_MAX_AGE_MINUTES",
-    *ANTHROPIC_VARS,
+    UNUSED_ANTHROPIC_VAR,
     REMOVED_HA_VAR,
+    REMOVED_CLAUDE_VAR,
 )
 
 # The key and the slug are path parts of the ping URL. "/", "?" or "#" would move
@@ -94,6 +110,13 @@ _OTHER_VARS = ("SMTP_HOST", "SMTP_FROM", "SITE_URL")
 # The state classes of the plan. Callers test kind, not the reason text, so a
 # change to the log text cannot change what a caller does.
 Kind = Literal["on", "disabled", "not_configured", "bad_flag", "incomplete"]
+ClaudeMode = Literal["none", "api_key", "subscription", "conflict"]
+
+_MODE_KEY: dict[str, str] = {
+    "api_key": CLAUDE_API_KEY,
+    "subscription": CLAUDE_OAUTH_TOKEN,
+}
+_MODE_LABEL: dict[str, str] = {"api_key": "API key", "subscription": "subscription"}
 
 
 @dataclass(frozen=True)
@@ -109,8 +132,13 @@ class FeatureState:
         return self.kind == "on"
 
     def log_line(self) -> str:
+        # An on feature has a reason only when it has modes (claude).
         if self.on:
-            return f"{self.name}: on"
+            return (
+                f"{self.name}: on ({self.reason})"
+                if self.reason
+                else f"{self.name}: on"
+            )
         return f"{self.name}: off ({self.reason})"
 
 
@@ -226,11 +254,63 @@ def _present(var: str) -> bool:
     return bool(_env(var))
 
 
+def _key_set(environ: Mapping[str, str], var: str) -> bool:
+    value = environ.get(var, "").strip()
+    return bool(value) and not _unresolved(value)
+
+
+def claude_mode(environ: Mapping[str, str] | None = None) -> ClaudeMode:
+    """Return the Claude auth mode. An empty or op:// key counts as not set.
+
+    environ defaults to os.environ, read at call time.
+    """
+    env = os.environ if environ is None else environ
+    api_key = _key_set(env, CLAUDE_API_KEY)
+    token = _key_set(env, CLAUDE_OAUTH_TOKEN)
+    if api_key and token:
+        return "conflict"
+    if api_key:
+        return "api_key"
+    if token:
+        return "subscription"
+    return "none"
+
+
+def claude_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """Return a copy of environ for the claude subprocess.
+
+    The copy holds no Claude credential except the key of the chosen mode. With
+    mode none or conflict, it holds none of them.
+    """
+    env = {k: v for k, v in environ.items() if k not in CLAUDE_CREDENTIALS}
+    key = _MODE_KEY.get(claude_mode(environ))
+    if key:
+        env[key] = environ[key].strip()
+    return env
+
+
+def _claude_state() -> FeatureState:
+    mode = claude_mode()
+    if mode == "conflict":
+        return FeatureState(
+            "claude",
+            "incomplete",
+            f"both {CLAUDE_API_KEY} and {CLAUDE_OAUTH_TOKEN} are set. "
+            "Set one of them, or neither",
+        )
+    if mode == "none":
+        return FeatureState("claude", "not_configured", "not configured")
+    return FeatureState("claude", "on", _MODE_LABEL[mode])
+
+
 def feature(name: str) -> FeatureState:
     """Apply the on/off rule to one feature."""
     if name not in FEATURES:
         raise ValueError(f"unknown feature: {name}")
+    if name == "claude":
+        return _claude_state()
     flag, needed = FEATURES[name]
+    assert flag is not None  # only claude has no flag
 
     flag_value = _env(flag).lower()
     if flag in os.environ and flag_value not in _TRUE | _FALSE:
@@ -319,7 +399,10 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
             )
             if any(_var_unresolved(v) for v in state.problems):
                 warnings.append(OP_WARNING)
-    for var in _OTHER_VARS:
+        elif state.kind == "incomplete":
+            # A state with no problem variable to name, such as both Claude keys set.
+            warnings.append(f"WARNING: {n} is off ({state.reason}).")
+    for var in (*_OTHER_VARS, CLAUDE_API_KEY, CLAUDE_OAUTH_TOKEN):
         if _unresolved(_env(var)) and not any(var in s.problems for s in states):
             warnings.append(f"WARNING: {var} is not resolved. It is not used.")
             warnings.append(OP_WARNING)
@@ -330,18 +413,22 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
         )
         if _unresolved(_env("HEALTH_MAX_AGE_MINUTES")):
             warnings.append(OP_WARNING)
-    for var in ANTHROPIC_VARS:
-        if _env(var):
-            warnings.append(
-                f"WARNING: {var} is set. The claude CLI uses it before "
-                "CLAUDE_CODE_OAUTH_TOKEN, so the runs go on the API bill, "
-                "not the subscription."
-            )
+    if _env(UNUSED_ANTHROPIC_VAR):
+        warnings.append(
+            f"WARNING: {UNUSED_ANTHROPIC_VAR} is set. It is not used. "
+            f"Remove it from .env. Set {CLAUDE_API_KEY} or {CLAUDE_OAUTH_TOKEN}."
+        )
     if _env(REMOVED_HA_VAR):
         warnings.append(
             f"WARNING: {REMOVED_HA_VAR} is set. The SSH push was removed. "
             "Remove it from .env. To feed the Home Assistant sensors, set "
             "HA_ENABLED=true and change the sensors to read the site URLs."
+        )
+    if _env(REMOVED_CLAUDE_VAR):
+        warnings.append(
+            f"WARNING: {REMOVED_CLAUDE_VAR} is set. The flag was removed. "
+            "Remove it from .env. The claude feature is on when "
+            f"{CLAUDE_API_KEY} or {CLAUDE_OAUTH_TOKEN} is set."
         )
     errors = [
         f"ERROR: Required variable {n} is missing or not resolved" for n in required()

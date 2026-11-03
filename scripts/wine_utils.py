@@ -19,6 +19,8 @@ import sys
 import time
 from datetime import date
 
+import settings
+
 # Ensure TZ env var is respected before using date.today()
 if "TZ" in os.environ:
     time.tzset()
@@ -183,9 +185,16 @@ def call_claude(prompt: str) -> str:
             capture_output=True,
             text=True,
             timeout=120,
+            # Only the credential of the chosen mode, so a run cannot go on
+            # the wrong bill.
+            env=settings.claude_env(os.environ),
         )
     except subprocess.TimeoutExpired:
         print("WARNING: Claude CLI timed out", file=sys.stderr)
+        return ""
+    except FileNotFoundError as e:
+        # The CLI is not installed. Continue with empty notes, as for a timeout.
+        print(f"WARNING: Claude CLI could not start: {e}", file=sys.stderr)
         return ""
     if result.returncode != 0:
         print(

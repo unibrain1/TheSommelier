@@ -13,7 +13,7 @@ The Sommelier reads your [CellarTracker](https://www.cellartracker.com) cellar a
 - **Drinking plan** — One bottle a week for 52 weeks, ranked by drinking window, season, variety and CellarTracker rating. [How it works](docs/how-it-works.md)
 - **Seasons and holidays** — Light wines for spring and summer, bold reds for fall and winter, special bottles on your holidays. [Plan configuration](docs/plan-configuration.md)
 - **Food-wine pairing** — One suggestion from your cellar for each meal in your Google Calendar. [Pairing](docs/how-it-works.md#food-wine-pairing), [Menu Guide](docs/menu-guide.md)
-- **Claude tasting notes** — A short note for each bottle. The container logs in with a token, not an API key. [Claude login](docs/features.md#claude-login)
+- **Claude tasting notes** — A short note for each bottle. Use your Claude subscription or an API key. [Claude login](docs/features.md#claude-login)
 - **Morning digest** — An email that names the wine to open with today's meal. [Digest email](docs/features.md#morning-digest-email)
 - **Home Assistant** — REST sensors for the wine of the week and today's pairing. [Home Assistant](docs/home-assistant.md)
 - **Healthchecks.io** — Each sync pings your check. [Healthchecks.io ping](docs/features.md#healthchecksio-ping)
