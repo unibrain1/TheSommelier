@@ -1,56 +1,147 @@
-"""Static checks: compose and nginx agree on the folder that holds the site."""
+"""Static checks of docker-compose.yml and nginx.conf for the standalone image."""
 
 import re
 from pathlib import Path
 
 import pytest
+import yaml
+
+import settings
 
 REPO = Path(__file__).resolve().parent.parent
 SERVICES = ("the-sommelier", "run-now")
+NGINX_TEMP_DIRECTIVES = (
+    "client_body_temp_path",
+    "proxy_temp_path",
+    "fastcgi_temp_path",
+    "uwsgi_temp_path",
+    "scgi_temp_path",
+)
 
 
-def _service_env(service: str) -> dict[str, str]:
-    """Read the `environment:` list of one service in docker-compose.yml.
-
-    PyYAML is not a dependency of the project, so this reads the one shape that
-    the file uses: a list of `- NAME=value` lines under `environment:`.
-    """
-    lines = (REPO / "docker-compose.yml").read_text(encoding="utf-8").splitlines()
-    start = lines.index(f"  {service}:")
-    env: dict[str, str] = {}
-    in_env = False
-    for line in lines[start + 1 :]:
-        if re.match(r"  \S", line):  # the next service
-            break
-        if re.match(r"    environment:\s*$", line):
-            in_env = True
-            continue
-        if in_env:
-            match = re.match(r"      - ([A-Z_]+)=(.*?)\s*$", line)
-            if match:
-                env[match.group(1)] = match.group(2)
-            elif not re.match(r"\s*(#.*)?$", line):
-                break
-    return env
+@pytest.fixture(scope="module")
+def compose() -> dict:
+    return yaml.safe_load((REPO / "docker-compose.yml").read_text(encoding="utf-8"))
 
 
-def _nginx_root() -> str:
-    match = re.search(r"^\s*root\s+(\S+?);", (REPO / "nginx.conf").read_text(), re.M)
-    assert match, "no root in nginx.conf"
+@pytest.fixture(scope="module")
+def nginx_conf() -> str:
+    """The nginx config without comments, so a comment cannot satisfy a check."""
+    text = (REPO / "nginx.conf").read_text(encoding="utf-8")
+    return re.sub(r"#.*", "", text)
+
+
+def _directive_values(conf: str, name: str) -> list[str]:
+    return re.findall(rf"^\s*{name}\s+(\S+?);", conf, re.M)
+
+
+def _root_in_block(conf: str, opener: str) -> str:
+    """Return the `root` of the first block that starts with `opener`."""
+    start = conf.index(opener)
+    match = re.search(r"\broot\s+(\S+?);", conf[start:])
+    assert match, f"no root after {opener!r}"
     return match.group(1)
 
 
 @pytest.mark.parametrize("service", SERVICES)
-def test_compose_service_sets_data_dir_and_site_dir(service):
-    env = _service_env(service)
+def test_compose_has_no_bind_mount_of_the_repo(compose, service):
+    volumes = compose["services"][service]["volumes"]
+    assert volumes, f"{service} has no volumes"
 
-    assert env.get("DATA_DIR"), f"{service} sets no DATA_DIR: {env}"
-    assert env.get("SITE_DIR"), f"{service} sets no SITE_DIR: {env}"
+    for volume in volumes:
+        if isinstance(volume, str):
+            target = volume.split(":")[1]
+        else:
+            target = volume["target"]
+        # The code comes from the image. Any mount at /app brings back host code.
+        assert target != "/app" and not target.startswith("/app/"), (
+            f"{service} mounts over the code: {volume}"
+        )
 
 
 @pytest.mark.parametrize("service", SERVICES)
-def test_compose_site_folder_is_the_nginx_root(service):
-    env = _service_env(service)
-    site = env.get("SITE_DIR") or f"{env['DATA_DIR']}/site"
+def test_compose_sets_no_path_environment(compose, service):
+    env = compose["services"][service]["environment"]
+    assert isinstance(env, dict)
 
-    assert site == _nginx_root()
+    for name in ("DATA_DIR", "SITE_DIR", "PLAN_CONFIG"):
+        assert name not in env, f"{service} sets {name}"
+
+
+@pytest.mark.parametrize("service", SERVICES)
+def test_compose_sets_the_pacific_time_zone(compose, service):
+    # A service-level `environment:` replaces the anchor block, so a service
+    # that sets its own `environment:` must repeat TZ. Without it, supercronic
+    # reads the schedule in UTC.
+    env = compose["services"][service]["environment"]
+
+    assert env["TZ"] == "America/Los_Angeles"
+
+
+@pytest.mark.parametrize("service", SERVICES)
+def test_compose_data_is_the_named_volume(compose, service):
+    volumes = compose["services"][service]["volumes"]
+
+    assert "sommelier-data:/data" in volumes
+    assert "sommelier-data" in compose["volumes"]
+
+
+def test_compose_run_now_runs_one_sync(compose):
+    run_now = compose["services"]["run-now"]
+
+    assert run_now["command"][-1] == "/app/fetch_docker.sh"
+    assert run_now["entrypoint"] == []
+    assert run_now["profiles"] == ["run-now"]
+    assert run_now["healthcheck"] == {"disable": True}
+
+
+def test_compose_scheduled_service_is_not_in_the_run_now_profile(compose):
+    assert "profiles" not in compose["services"]["the-sommelier"]
+
+
+@pytest.mark.parametrize("service", SERVICES)
+def test_compose_user_is_not_root(compose, service):
+    user = str(compose["services"][service]["user"])
+
+    uid = user.split(":")[0]
+    assert uid.isdigit(), f"user {user!r} is not numeric"
+    assert int(uid) != 0
+
+
+@pytest.mark.parametrize("service", SERVICES)
+def test_compose_service_is_hardened(compose, service):
+    config = compose["services"][service]
+
+    assert config["read_only"] is True
+    assert "/tmp" in config["tmpfs"]
+    assert config["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in config["security_opt"]
+
+
+def test_nginx_static_root_is_the_image_site(nginx_conf):
+    assert _root_in_block(nginx_conf, "server {") == "/app/site"
+
+
+def test_nginx_data_root_is_the_default_site_dir(nginx_conf, monkeypatch):
+    for name in ("DATA_DIR", "SITE_DIR"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert _root_in_block(nginx_conf, "location @data") == str(settings.site_dir())
+
+
+def test_nginx_writes_only_to_tmp(nginx_conf):
+    pids = _directive_values(nginx_conf, "pid")
+    temp_paths = [
+        path
+        for name in NGINX_TEMP_DIRECTIVES
+        for path in _directive_values(nginx_conf, name)
+    ]
+
+    assert len(pids) == 1
+    assert len(temp_paths) == len(NGINX_TEMP_DIRECTIVES)
+    for path in pids + temp_paths:
+        assert path.startswith("/tmp/"), path
+
+
+def test_nginx_has_no_user_line(nginx_conf):
+    assert not re.search(r"^\s*user\s", nginx_conf, re.M)

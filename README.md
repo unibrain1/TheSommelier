@@ -12,8 +12,6 @@ Don't let good wine go to waste. The Sommelier is your personal wine advisor —
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  SELF-UPDATE         git pull                           │
-├─────────────────────────────────────────────────────────┤
 │  FETCH (scripted)                                       │
 │    CellarTracker inventory + notes + food tags           │
 │    Google Calendar menu                                 │
@@ -33,8 +31,6 @@ Don't let good wine go to waste. The Sommelier is your personal wine advisor —
 ```
 
 The plan regenerates from scratch every run. CellarTracker is the system of record for all wine metadata. Claude generates tasting notes. Everything else is deterministic.
-
-Self-updating: push code to GitHub, next pipeline run picks it up automatically.
 
 ## How Wines Are Prioritized
 
@@ -135,10 +131,12 @@ python3 -m http.server -d site 8080
 ### Docker (Homelab)
 
 ```bash
-# First time or Dockerfile changes
-docker compose up --build -d
+# First time, or after any code change: pull the code, then rebuild the image
+git pull
+docker compose build
+docker compose down && docker compose up -d
 
-# Code changes only — no rebuild needed
+# Settings change only: no rebuild needed
 docker compose down && docker compose up -d
 
 # One-shot test run
@@ -146,7 +144,19 @@ docker compose run --rm run-now
 ```
 
 Container: `the-sommelier`. Schedule configurable via `SYNC_SCHEDULE` env var (one or more cron expressions, separated by `;`). The default runs every 30 minutes from 6am to 10pm Pacific, so CellarTracker and Paprika changes show up within 30 minutes.
-Runs as non-root (configure `user` in docker-compose.yml to match your host UID/GID).
+
+The image holds the code. The container does not run `git` or `pip install`. A code change needs a new image, so rebuild it.
+
+Volumes:
+
+- `sommelier-data` is a named volume at `/data`. It holds the plan, the caches, the digest state and the published site files.
+- `./config:/config:ro` is a read-only bind mount. Put `plan.yaml` in the `./config` folder on the host.
+
+Only `/data` and `/tmp` are writable. The root file system is read-only.
+
+The container runs as `user: "1000:1000"`, not as root. The container also sets `read_only: true`, `cap_drop: ALL` and `no-new-privileges`. A bind mount for `/data` must be writable by UID 1000.
+
+The image has a Docker health check. Run `docker inspect` to see the state. The check passes when nginx serves `index.html` and the published `plan.json` is recent. `HEALTH_MAX_AGE_MINUTES` sets the age limit. The setting is optional and the default is 600.
 
 `docker-compose.yml` is generic. It publishes no port. Put the settings for your host in `docker-compose.override.yml`, which git ignores. Docker Compose reads it automatically when you do not use `-f`. To start, copy the sample:
 

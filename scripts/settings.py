@@ -12,6 +12,8 @@ rules forbid eval:
 
 A bad argument exits 2. DATA_DIR defaults to /data, SITE_DIR defaults to
 $DATA_DIR/site, and PLAN_CONFIG defaults to /config/plan.yaml.
+HEALTH_MAX_AGE_MINUTES defaults to 600. A value that is not a positive integer
+gives the default, and check logs a warning.
 
 A feature turns on when all its settings are present and valid. A feature with
 no settings (home_assistant) turns on only when its <FEATURE>_ENABLED flag is a
@@ -42,6 +44,8 @@ DEFAULT_SMTP_HOST = "smtp.gmail.com"
 DEFAULT_SMTP_PORT = 587
 DEFAULT_HC_SLUG = "the-sommelier"
 DEFAULT_HC_BASE_URL = "https://hc-ping.com"
+# The 8-hour night gap of the default schedule, plus 2 hours.
+DEFAULT_HEALTH_MAX_AGE_MINUTES = 600
 
 # feature -> (enable flag, settings that must be present)
 FEATURES: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -70,6 +74,7 @@ ALL_VARS: tuple[str, ...] = (
     "SMTP_FROM",
     "HEALTHCHECK_SLUG",
     "HEALTHCHECK_BASE_URL",
+    "HEALTH_MAX_AGE_MINUTES",
     *ANTHROPIC_VARS,
     REMOVED_HA_VAR,
 )
@@ -157,15 +162,20 @@ def _recipients() -> list[str]:
     return [r.strip() for r in _env("DIGEST_RECIPIENTS").split(",") if r.strip()]
 
 
+def _positive_int(raw: str) -> int | None:
+    # isdigit alone accepts "²", which int() rejects.
+    if not (raw.isascii() and raw.isdigit()):
+        return None
+    value = int(raw)
+    return value if value >= 1 else None
+
+
 def _smtp_port() -> int | None:
     raw = _env("SMTP_PORT")
     if not raw:
         return DEFAULT_SMTP_PORT
-    # isdigit alone accepts "²", which int() rejects.
-    if not (raw.isascii() and raw.isdigit()):
-        return None
-    port = int(raw)
-    return port if 1 <= port <= 65535 else None
+    port = _positive_int(raw)
+    return port if port is not None and port <= 65535 else None
 
 
 def _hc_base_url() -> str | None:
@@ -275,6 +285,21 @@ def site_url() -> str:
     return _env("SITE_URL")
 
 
+def _health_max_age() -> int | None:
+    raw = _env("HEALTH_MAX_AGE_MINUTES")
+    if not raw:
+        return DEFAULT_HEALTH_MAX_AGE_MINUTES
+    return _positive_int(raw)
+
+
+def health_max_age_minutes() -> int:
+    """Return the maximum age of plan.json for a healthy container.
+
+    A value that is not valid gives the default. check_lines() warns about it.
+    """
+    return _health_max_age() or DEFAULT_HEALTH_MAX_AGE_MINUTES
+
+
 OP_WARNING = (
     "WARNING: A value starts with op://. "
     "Resolve it before the start, for example with op run."
@@ -297,6 +322,13 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
     for var in _OTHER_VARS:
         if _unresolved(_env(var)) and not any(var in s.problems for s in states):
             warnings.append(f"WARNING: {var} is not resolved. It is not used.")
+            warnings.append(OP_WARNING)
+    if _health_max_age() is None:
+        warnings.append(
+            "WARNING: HEALTH_MAX_AGE_MINUTES is not a positive integer. "
+            f"The health check uses {DEFAULT_HEALTH_MAX_AGE_MINUTES}."
+        )
+        if _unresolved(_env("HEALTH_MAX_AGE_MINUTES")):
             warnings.append(OP_WARNING)
     for var in ANTHROPIC_VARS:
         if _env(var):

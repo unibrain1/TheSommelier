@@ -15,22 +15,6 @@ ping_on_failure() {
 }
 trap ping_on_failure EXIT
 
-# --- SELF-UPDATE ---
-# Bash keeps reading the copies of this file and the wrapper that it opened at
-# start. If the pull brings new commits, start the wrapper again so that the
-# new shell code runs. PIPELINE_REEXEC stops a second pull, so the restart
-# cannot loop. $0 is the wrapper, because the wrapper sources this file.
-if [[ -d .git && -z "${PIPELINE_REEXEC:-}" ]]; then
-  PIPELINE_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-  log "==> Pulling latest from git..."
-  git pull --ff-only 2>&1 || log "WARNING: git pull failed — running with current version"
-  if [[ "$(git rev-parse HEAD 2>/dev/null || echo "changed")" != "${PIPELINE_HEAD}" ]]; then
-    log "==> New commits pulled, starting the pipeline again..."
-    PIPELINE_REEXEC=1 exec bash "$0" "$@"
-  fi
-fi
-unset PIPELINE_REEXEC
-
 # --- SETTINGS ---
 log "==> Checking settings..."
 python3 scripts/settings.py check || { log "ERROR: Settings check failed"; exit 1; }
@@ -133,6 +117,8 @@ python3 scripts/pairing.py "${DATA_DIR}/menu.json" "${DATA_DIR}/plan.json" "${DA
 
 # --- PUBLISH atomically (site always has a complete plan with notes) ---
 log "==> Publishing to ${SITE_DIR}..."
+# container_health.py reads the mtime of the published plan.json as the time of
+# the last complete run. Do not use cp -p or touch -r: they keep the old mtime.
 cp "${DATA_DIR}/plan.json" "${SITE_DIR}/plan.json"
 cp "${DATA_DIR}/pairing_suggestions.json" "${SITE_DIR}/pairing_suggestions.json"
 cp "${DATA_DIR}/report.json" "${SITE_DIR}/report.json"

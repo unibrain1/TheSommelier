@@ -3,8 +3,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # A run on the host uses the repo folders, as fetch.sh does. Docker creates
-# /.dockerenv. In the container, compose gives all settings, and a .env from
-# the mounted repo must not change the folders.
+# /.dockerenv. In the container, compose gives all settings. The image has no
+# .env and the repo is not mounted, so the host defaults must not apply there.
 if [[ ! -f /.dockerenv ]]; then
   # Skip .env when the values are already in the environment (the 1Password
   # CLI), so that the op:// references in .env do not replace them.

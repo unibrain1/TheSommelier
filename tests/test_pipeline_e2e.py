@@ -219,7 +219,6 @@ def harness(tmp_path, server) -> Harness:
         "PATH": path,
         "HOME": str(tmp_path / "home"),
         "PYTHONDONTWRITEBYTECODE": "1",
-        "PIPELINE_REEXEC": "1",
         "FAKE_CURL_LOG": str(curl_log),
         "FAKE_CURL_FIXTURES": str(fixtures),
         "USERNAME": FAKE_USER,
@@ -324,6 +323,22 @@ def test_pipeline_missing_required_exits_nonzero(harness, missing):
     # The settings check stops the run before any fetch.
     assert harness.curl_urls() == []
     assert not Path(harness.env["DATA_DIR"]).exists()
+
+
+def test_failed_run_leaves_published_plan_unchanged(harness):
+    # container_health.py reads the mtime of plan.json as the time of the last
+    # complete run. A run that fails before the publish must not touch it.
+    plan = Path(harness.env["SITE_DIR"]) / "plan.json"
+    first = harness.run("fetch_docker.sh")
+    assert first.returncode == 0, _output(first)
+    before = plan.stat().st_mtime_ns
+    (harness.app / "scripts" / "pairing.py").write_text("raise SystemExit(1)\n")
+
+    second = harness.run("fetch_docker.sh")
+
+    assert second.returncode != 0, _output(second)
+    assert "Pairing failed" in second.stdout
+    assert plan.stat().st_mtime_ns == before
 
 
 def test_pipeline_failure_sends_fail_ping(harness):

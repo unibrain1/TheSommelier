@@ -2,8 +2,7 @@
 #
 # Copy this file to the PLAN_CONFIG path and change it for your cellar:
 #   - bash fetch.sh reads config/plan.yaml in the repo.
-#   - The container reads /config/plan.yaml. Until the /config volume
-#     exists (#112), docker-compose.yml sets /app/config/plan.yaml.
+#   - The container reads /config/plan.yaml from the ./config mount.
 # If the file is missing, the plan uses the five holidays below and no
 # evolution tracks. A field that is not valid stops the run with an error
 # that names the field.

@@ -26,6 +26,12 @@ services:
     # To limit it to the host, use "127.0.0.1:8089:8080".
     ports:
       - "8089:8080"
+    # Optional: keep /data in a host folder instead of the sommelier-data
+    # volume. This entry replaces the /data entry of docker-compose.yml.
+    # The container runs as UID 1000, so the host folder must be writable by
+    # UID 1000. Set the same entry on run-now, so both use one folder.
+    # volumes:
+    #   - /srv/the-sommelier/data:/data
 
   run-now:
     dns:
@@ -33,6 +39,8 @@ services:
       - 192.0.2.11
       - 8.8.8.8
     # run-now needs no reverse proxy network, because it serves no requests.
+    # volumes:
+    #   - /srv/the-sommelier/data:/data
 
 networks:
   traefik_proxy:
