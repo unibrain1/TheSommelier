@@ -1,6 +1,5 @@
 """Static checks of the workflow that publishes the image to GHCR."""
 
-import fnmatch
 import re
 from pathlib import Path
 
@@ -36,17 +35,28 @@ def _dockerignore_includes() -> list:
     return [line[1:] for line in lines if line.startswith("!")]
 
 
-def test_pull_request_build_is_limited_to_the_image_files(workflow):
-    paths = _triggers(workflow)["pull_request"]["paths"]
+def test_pull_request_build_starts_on_the_build_inputs(workflow):
+    pull_request = _triggers(workflow)["pull_request"]
 
-    assert "Dockerfile" in paths
+    assert "paths-ignore" not in pull_request
+    assert {
+        "Dockerfile",
+        ".dockerignore",
+        ".github/workflows/publish-image.yml",
+    } <= set(pull_request["paths"])
+
+
+def test_the_dockerignore_allow_list_is_read():
+    # An empty list would skip the parametrized test below instead of failing it.
+    assert {"requirements.txt", "nginx.conf"} <= set(_dockerignore_includes())
 
 
 @pytest.mark.parametrize("pattern", _dockerignore_includes())
 def test_every_image_file_pattern_starts_the_pull_request_build(workflow, pattern):
     paths = _triggers(workflow)["pull_request"]["paths"]
 
-    assert pattern in paths or any(fnmatch.fnmatch(pattern, p) for p in paths)
+    # Exact match: Python's fnmatch lets `*` cross `/`, GitHub's path filter does not.
+    assert pattern in paths
 
 
 def test_the_image_is_built_for_both_architectures(steps):
@@ -66,7 +76,7 @@ def test_a_pull_request_pushes_nothing_and_does_not_log_in(steps):
 def test_a_version_tag_main_and_a_manual_run_start_the_workflow(workflow):
     triggers = _triggers(workflow)
 
-    assert triggers["push"]["tags"] == ["v*"]
+    assert triggers["push"]["tags"] == ["v[0-9]+.[0-9]+.[0-9]+*"]
     # The milestone branch pushes edge because a manual run needs the file on main.
     assert triggers["push"]["branches"] == ["main", "milestone/**"]
     assert "workflow_dispatch" in triggers
@@ -77,12 +87,14 @@ def test_the_tags_follow_the_release_rules(steps):
     tags = meta["tags"]
 
     assert "latest=false" in meta["flavor"]
-    assert "type=semver,pattern={{version}}" in tags
-    assert "type=semver,pattern={{major}}.{{minor}}" in tags
+    # A manual run on an old tag must not rebuild 4.0.0 or move latest back.
+    push_only = "enable=${{ github.event_name == 'push' }}"
+    assert f"type=semver,pattern={{{{version}}}},{push_only}" in tags
+    assert f"type=semver,pattern={{{{major}}}}.{{{{minor}}}},{push_only}" in tags
     # A prerelease tag (v4.1.0-rc1) must not move latest.
     assert (
-        "type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') "
-        "&& !contains(github.ref, '-') }}"
+        "type=raw,value=latest,enable=${{ github.event_name == 'push' "
+        "&& startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}"
     ) in tags
     # A branch pushes edge. A manual run on a tag must not overwrite it.
     assert (
@@ -129,4 +141,24 @@ def test_each_action_is_pinned_by_commit_sha_with_a_version_comment():
 
 def test_only_the_job_can_write_packages(workflow):
     assert workflow["permissions"] == {"contents": "read"}
-    assert workflow["jobs"]["image"]["permissions"]["packages"] == "write"
+    assert workflow["jobs"]["image"]["permissions"] == {
+        "contents": "read",
+        "packages": "write",
+    }
+
+
+def test_only_the_build_step_pushes(steps):
+    # A `run: docker push` step would skip the pull request gate on the build step.
+    for step in steps:
+        if step.get("uses", "").startswith("docker/build-push-action@"):
+            continue
+        assert "push" not in step.get("run", "")
+
+
+def test_a_manual_run_on_a_tag_fails_before_the_build(steps):
+    guard = steps[0]
+
+    assert guard["if"] == (
+        "github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/')"
+    )
+    assert "exit 1" in guard["run"]
