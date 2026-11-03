@@ -73,6 +73,23 @@ def test_call_claude_failure_logs_the_cause(
     assert "x" * 301 not in err
 
 
+@pytest.mark.parametrize("name", settings.CLAUDE_CREDENTIALS)
+def test_call_claude_failure_masks_credentials(clean_env, capsys, name):
+    clean_env.setenv(name, "SECRET-canary-key")
+
+    def fail(args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args, 1, stdout="bad key SECRET-canary-key\n", stderr=""
+        )
+
+    clean_env.setattr(wine_utils.subprocess, "run", fail)
+
+    assert wine_utils.call_claude("prompt") == ""
+    err = capsys.readouterr().err
+    assert "SECRET-canary-key" not in err
+    assert "bad key ***" in err
+
+
 def test_call_claude_without_cli_gives_empty_result(clean_env, capsys):
     def missing(*_args, **_kwargs):
         raise FileNotFoundError("claude-canary")

@@ -198,7 +198,13 @@ def call_claude(prompt: str) -> str:
         return ""
     if result.returncode != 0:
         # The CLI writes auth errors ("Invalid API key") to stdout, not stderr.
-        detail = (result.stderr.strip() or result.stdout.strip())[:300]
+        detail = result.stderr.strip() or result.stdout.strip()
+        # Mask before the cut, so that a cut cannot leave part of a key.
+        for name in settings.CLAUDE_CREDENTIALS:
+            value = os.environ.get(name, "").strip()
+            if value:
+                detail = detail.replace(value, "***")
+        detail = detail[:300]
         print(
             f"WARNING: Claude CLI returned {result.returncode}: {detail}",
             file=sys.stderr,
