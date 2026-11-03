@@ -58,6 +58,8 @@ The container logs in with a token. The token uses your Claude subscription.
 2. Put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN`. Remove the `# ` from its line in `compose.yaml`.
 3. Run `docker compose down && docker compose up -d`.
 
+Do not set `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`. The `claude` CLI uses them before the token, so the runs go on the API bill and not on your subscription.
+
 The token expires one year after you make it. After that, the sync continues with empty notes. Make a new token and replace the value.
 
 ## CellarTracker community notes

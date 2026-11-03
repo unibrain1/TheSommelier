@@ -3,7 +3,7 @@
 # Save this file as config/plan.yaml and change it for your cellar:
 #   - In Docker, use the config folder next to compose.yaml. Download this
 #     file there with:
-#       curl -fsSLo config/plan.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/plan.yaml.sample
+#       curl --create-dirs -fsSLo config/plan.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/plan.yaml.sample
 # Without the file, the plan uses the five holidays below and no evolution
 # tracks. A field that is not valid stops the sync with an error that names
 # the field.

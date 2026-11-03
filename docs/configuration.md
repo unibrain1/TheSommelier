@@ -18,7 +18,7 @@ In `compose.yaml`, a secret is a line with `${NAME}`. Compose reads its value fr
 
 Choose how the values reach The Sommelier:
 
-- Plain values in `.env`: run `bash fetch.sh`. A variable that you already set in the shell wins over `.env`.
+- Plain values in `.env`: run `bash fetch.sh`. The script reads `.env` only when `USERNAME`, `PASSWORD` or `GOOGLE_CALENDAR_ICS_URL` is not in the shell. Then each value in `.env` replaces the same variable in the shell. When all three are in the shell (for example with `op run`), the script does not read `.env`.
 - Docker with `compose.yaml`: compose reads `.env` or the host environment for each `${NAME}`.
 - Docker with `docker-compose.yml`: compose passes the values with `env_file: .env`, so `.env` must hold plain values.
 - 1Password references: see [Keep secrets in 1Password](suggestions.md#keep-secrets-in-1password).

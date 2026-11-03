@@ -1,6 +1,7 @@
 """Static checks: the docs and the samples match the env variables the code reads."""
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ REPO = Path(__file__).resolve().parent.parent
 REMOVED_VARS = {"HA_SSH_TARGET"}
 # Scripts read these outside settings.py, which does not own them.
 SHELL_VARS = {"SYNC_SCHEDULE", "DIGEST_SEND_SCHEDULE", "TZ"}
-UPPER_NAME = re.compile(r'"([A-Z][A-Z0-9_]{2,})"')
+UPPER_NAME = re.compile(r"""["']([A-Z][A-Z0-9_]{2,})["']""")
 
 SAMPLES = (
     ".env.sample",
@@ -22,10 +23,10 @@ SAMPLES = (
     "docker-compose.override.yml.sample",
     "config/plan.yaml.sample",
 )
-STALE = re.compile(r"git\s+pull|op\s+read|HA_SSH_TARGET", re.I)
+STALE = re.compile(r"\bgit\s+pull\b|\bop\s+read\b|\bHA_SSH_TARGET\b", re.I)
 # The code reads these, but a user never sets them. The docs and the samples
-# must not list them: the image fixes the folders, and the claude CLI warns
-# about the Anthropic variables by itself.
+# must not list them: the image fixes the folders. Only the Claude login
+# section may name the Anthropic variables, to tell the user not to set them.
 INTERNAL_VARS = {
     "DATA_DIR",
     "SITE_DIR",
@@ -40,7 +41,15 @@ def _current_docs() -> list[str]:
     """Every tracked doc and sample that describes how things work now."""
     names = ["README.md", "CLAUDE.md", "docker-compose.yml", "Dockerfile", *SAMPLES]
     names += [p.relative_to(REPO).as_posix() for p in (REPO / "docs").glob("*.md")]
-    names += [p.relative_to(REPO).as_posix() for p in (REPO / ".claude").rglob("*.md")]
+    # Only tracked files count, so a clean clone and the owner's machine agree.
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", ".claude/*.md"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    names += tracked
     # A worktree is a copy of the repo. The deploy skill is local to the owner,
     # is not in git, and describes the old production host until #116.
     skip = (".claude/worktrees/", ".claude/skills/deploy/")
@@ -56,8 +65,14 @@ def _section(text: str, heading: str) -> str:
     depth = len(heading.split(" ", 1)[0])
     start = text.index(f"\n{heading}\n")
     rest = text[start + 1 :]
-    end = re.search(rf"^#{{1,{depth}}} ", rest[len(heading) :], re.M)
-    return rest if end is None else rest[: len(heading) + end.start()]
+    offset, fenced = len(heading), False
+    for line in rest[len(heading) :].splitlines(keepends=True):
+        if line.startswith("```"):
+            fenced = not fenced
+        elif not fenced and re.match(rf"#{{1,{depth}}} ", line):
+            return rest[:offset]
+        offset += len(line)
+    return rest
 
 
 def _code_env_names() -> set[str]:
@@ -84,7 +99,9 @@ def _shell_inputs(text: str) -> set[str]:
     )
     assigned |= set(re.findall(r"read\s+(?:-\w+\s+)*([A-Z][A-Z0-9_]+)", text))
     assigned |= set(re.findall(r"for\s+([A-Z][A-Z0-9_]+)\s+in", text))
-    return used - assigned - SHELL_BUILTINS
+    # NAME="${NAME:-x}" sets a default for a variable that the host may set.
+    defaulted = set(re.findall(r"\b([A-Z][A-Z0-9_]+)=\"?\$\{?\1\b", text))
+    return used - (assigned - defaulted) - SHELL_BUILTINS
 
 
 def _python_inputs(text: str) -> set[str]:
@@ -92,7 +109,7 @@ def _python_inputs(text: str) -> set[str]:
     quoted = r"""["']([A-Z][A-Z0-9_]+)["']"""
     names = set(
         re.findall(
-            rf"(?:environ(?:\.get|\.setdefault)?[\[(]|getenv\()\s*{quoted}", text
+            rf"(?:environ(?:\.get|\.setdefault|\.pop)?[\[(]|getenv\()\s*{quoted}", text
         )
     )
     return names | set(re.findall(rf"{quoted} in os\.environ", text))
@@ -104,10 +121,12 @@ def _python_inputs(text: str) -> set[str]:
         (_shell_inputs, 'echo "${NEW_KNOB}"', {"NEW_KNOB"}),
         (_shell_inputs, 'X="${NEW_KNOB:-x}"', {"NEW_KNOB"}),
         (_shell_inputs, 'SET_HERE=1\necho "$SET_HERE"', set()),
+        (_shell_inputs, 'KNOB="${KNOB:-x}"\necho "$KNOB"', {"KNOB"}),
         (_shell_inputs, 'RC=$?; echo "${RC}"', set()),
         (_python_inputs, "os.environ.get('NEW_KNOB')", {"NEW_KNOB"}),
         (_python_inputs, 'os.environ.setdefault("NEW_KNOB", "1")', {"NEW_KNOB"}),
         (_python_inputs, 'os.getenv("NEW_KNOB")', {"NEW_KNOB"}),
+        (_python_inputs, 'os.environ.pop("NEW_KNOB", None)', {"NEW_KNOB"}),
         (_python_inputs, '"NEW_KNOB" in os.environ', {"NEW_KNOB"}),
         (_python_inputs, 'os.environ["NEW_KNOB"]', {"NEW_KNOB"}),
     ],
@@ -125,6 +144,7 @@ def test_no_script_reads_an_env_variable_that_the_test_does_not_collect():
             python |= _python_inputs(path.read_text("utf-8"))
 
     assert shell, "no shell variables found"
+    assert SHELL_VARS <= shell | python, "a script no longer reads a SHELL_VARS name"
     assert sorted(shell - _code_env_names()) == []
     assert sorted(python - _code_env_names()) == []
 
@@ -291,11 +311,16 @@ def test_the_user_docs_and_samples_do_not_name_internal_variables():
     names = ["README.md", *SAMPLES]
     names += [p.relative_to(REPO).as_posix() for p in (REPO / "docs").glob("*.md")]
     # docker-compose.yml is not a user doc: it sets the folders for the build.
+    # The Claude login section warns the user not to set the Anthropic variables.
+    allowed = {
+        ("docs/features.md", "ANTHROPIC_API_KEY"),
+        ("docs/features.md", "ANTHROPIC_AUTH_TOKEN"),
+    }
     found = {
         (name, var)
         for name in names
         for var in INTERNAL_VARS
         if re.search(rf"\b{var}\b", _text(name))
-    }
+    } - allowed
 
     assert sorted(found) == []

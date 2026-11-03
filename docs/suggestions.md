@@ -14,5 +14,5 @@ op run --env-file=op.env -- docker compose up -d
 
 - Compose reads the required variables in every command. Add the `op run` prefix to `logs`, `ps`, `down` and `run-now` also, for example `op run --env-file=op.env -- docker compose logs -f`. Without it, these commands stop with "required variable USERNAME is missing a value".
 - This works with `compose.yaml`, which reads each `${NAME}` from the environment. It does not work with `docker-compose.yml`, which reads `env_file: .env`.
-- For a run from a checkout, use `op run --env-file=op.env -- bash fetch.sh`.
-- A value that still starts with `op://` counts as not set. The run stops with an error that names the variable.
+- For a run from a checkout, use `op run --env-file=op.env -- bash fetch.sh`. `op.env` must also hold the plain values, such as `SMTP_HOST`. With all three required values resolved, `fetch.sh` does not read `.env`.
+- A required value that still starts with `op://` stops the run with an error that names the variable. An optional value that still starts with `op://` turns its feature off and logs a warning.
