@@ -29,6 +29,10 @@ A code change needs an image rebuild: run `git pull` on the host, then `docker c
 `docker compose restart` does NOT re-run the entrypoint — use `down/up` instead.
 `restart` keeps the stored container config. `down/up` and `run-now` read both compose files when they run.
 
+The container root is read-only. The `sommelier-data` named volume is at `/data`. The `./config` folder is at `/config`, read-only. Every write goes to `/data` or `/tmp`.
+
+The image has a `HEALTHCHECK` that runs `scripts/container_health.py`. The check passes when nginx serves `index.html` and the mtime of the published `plan.json` is recent. That mtime is the time of the last complete run. `HEALTH_MAX_AGE_MINUTES` sets the age limit. It is optional, and the default is 600. `settings.py` owns this rule. The `run-now` service disables the check.
+
 ## LLM vs Data Boundary
 
 - **CellarTracker is the system of record** for all wine metadata: Type/badge, Varietal, Appellation, scores, drinking windows, quantity.

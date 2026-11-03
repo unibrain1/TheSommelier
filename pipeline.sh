@@ -117,6 +117,8 @@ python3 scripts/pairing.py "${DATA_DIR}/menu.json" "${DATA_DIR}/plan.json" "${DA
 
 # --- PUBLISH atomically (site always has a complete plan with notes) ---
 log "==> Publishing to ${SITE_DIR}..."
+# container_health.py reads the mtime of the published plan.json as the time of
+# the last complete run. Do not use cp -p or touch -r: they keep the old mtime.
 cp "${DATA_DIR}/plan.json" "${SITE_DIR}/plan.json"
 cp "${DATA_DIR}/pairing_suggestions.json" "${SITE_DIR}/pairing_suggestions.json"
 cp "${DATA_DIR}/report.json" "${SITE_DIR}/report.json"
