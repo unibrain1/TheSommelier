@@ -2,8 +2,7 @@
 #
 # To use this file:
 #   1. Copy it to docker-compose.override.yml (git ignores that file).
-#   2. Replace each placeholder. Docker creates an empty directory for a
-#      bind-mount source that does not exist, so set a real key path.
+#   2. Replace each placeholder.
 #   3. Remove the parts that you do not need.
 #
 # Docker Compose reads docker-compose.override.yml automatically when you do
@@ -11,10 +10,6 @@
 # set these keys in this file only.
 services:
   the-sommelier:
-    volumes:
-      # Key for the Home Assistant push. Without it, the pipeline skips the push.
-      # Use a key for this push only, and set its mode to 600.
-      - ~/.ssh/<ha-key>:/run/secrets/ha_ssh_key:ro
     dns:
       - 192.0.2.10
       - 192.0.2.11
@@ -33,8 +28,6 @@ services:
       - "8089:8080"
 
   run-now:
-    volumes:
-      - ~/.ssh/<ha-key>:/run/secrets/ha_ssh_key:ro
     dns:
       - 192.0.2.10
       - 192.0.2.11

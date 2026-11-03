@@ -1,5 +1,5 @@
 # Generic file. Put host-specific settings (DNS, ports, reverse proxy labels,
-# networks, the Home Assistant SSH key) in docker-compose.override.yml.
+# networks) in docker-compose.override.yml.
 # See docker-compose.override.yml.sample.
 services:
   the-sommelier:

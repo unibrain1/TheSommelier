@@ -5,7 +5,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Install system packages + Node.js for Claude Code CLI + git for self-updating
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nginx curl jq nodejs npm git openssh-client \
+    nginx curl jq nodejs npm git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI

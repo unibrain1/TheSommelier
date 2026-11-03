@@ -37,6 +37,8 @@ python3 scripts/settings.py check || { log "ERROR: Settings check failed"; exit 
 DATA_DIR=$(python3 scripts/settings.py get data_dir)
 SITE_DIR=$(python3 scripts/settings.py get site_dir)
 mkdir -p "${DATA_DIR}" "${SITE_DIR}"
+# A run that was killed in publish_ha_json leaves its temporary file here.
+rm -f "${SITE_DIR}"/.thisweek.json.* "${SITE_DIR}"/.today.json.*
 
 # --- FETCH (scripted) ---
 CT_USERNAME="${USERNAME}"
@@ -135,25 +137,33 @@ cp "${DATA_DIR}/plan.json" "${SITE_DIR}/plan.json"
 cp "${DATA_DIR}/pairing_suggestions.json" "${SITE_DIR}/pairing_suggestions.json"
 cp "${DATA_DIR}/report.json" "${SITE_DIR}/report.json"
 
-# --- GENERATE HOME ASSISTANT JSON ---
-log "==> Generating Home Assistant JSON..."
-python3 scripts/thisweek.py "${DATA_DIR}/plan.json" > "${SITE_DIR}/thisweek.json" || log "WARNING: thisweek.py failed"
-python3 scripts/today.py "${DATA_DIR}/pairing_suggestions.json" > "${SITE_DIR}/today.json" || log "WARNING: today.py failed"
-
-# --- PUSH TO HOME ASSISTANT ---
-HA_SSH_KEY="/run/secrets/ha_ssh_key"
-if [[ -n "${HA_SSH_TARGET:-}" ]] && [[ -f "${HA_SSH_KEY}" ]]; then
-  log "==> Pushing to Home Assistant (${HA_SSH_TARGET})..."
-  HA_SSH_OPTS="-i ${HA_SSH_KEY} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
-  # shellcheck disable=SC2086
-  if ssh ${HA_SSH_OPTS} "${HA_SSH_TARGET}" "sudo tee /config/www/thisweek.json > /dev/null" < "${SITE_DIR}/thisweek.json" \
-    && ssh ${HA_SSH_OPTS} "${HA_SSH_TARGET}" "sudo tee /config/www/today.json > /dev/null" < "${SITE_DIR}/today.json"; then
-    log "    Pushed thisweek.json + today.json to Home Assistant"
+# --- HOME ASSISTANT JSON (Home Assistant pulls it with a REST sensor) ---
+# A script that fails must not leave an empty or partial file at the public URL.
+# On failure the published file is removed, so the sensor gets a 404 and shows
+# unavailable. The move is atomic because the temporary file is in SITE_DIR.
+# $1 = script, $2 = input file, $3 = name of the published file.
+publish_ha_json() {
+  local tmp rc=0
+  tmp=$(mktemp "${SITE_DIR}/.$3.XXXXXX")
+  python3 "scripts/$1" "$2" > "${tmp}" || rc=$?
+  if [[ ${rc} -eq 0 ]]; then
+    # mktemp creates mode 0600, and the web server user must read the file.
+    chmod 644 "${tmp}"
+    mv -f "${tmp}" "${SITE_DIR}/$3"
   else
-    log "WARNING: Failed to push JSON to Home Assistant"
+    rm -f "${tmp}" "${SITE_DIR}/$3"
+    log "WARNING: $1 failed (exit ${rc}) — removed $3"
   fi
+}
+
+if python3 scripts/settings.py enabled home_assistant; then
+  log "==> Generating Home Assistant JSON..."
+  publish_ha_json thisweek.py "${DATA_DIR}/plan.json" thisweek.json
+  publish_ha_json today.py "${DATA_DIR}/pairing_suggestions.json" today.json
 else
-  log "    Skipping Home Assistant push — HA_SSH_TARGET or SSH key not configured"
+  # A copy from an earlier run would look current to a sensor that still polls.
+  rm -f "${SITE_DIR}/thisweek.json" "${SITE_DIR}/today.json"
+  log "    Skipping Home Assistant JSON — HA_ENABLED is not true"
 fi
 
 # --- GENERATE DIGEST ---

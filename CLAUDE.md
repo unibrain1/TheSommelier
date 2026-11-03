@@ -20,7 +20,7 @@ Tests require `pytest` (install via `pip install pytest`).
 
 Production runs in Docker on the owner's homelab server. The commands to restart, rebuild, or read logs on that server are in a local `deploy` skill. That skill is not in git.
 
-`docker-compose.yml` is generic. Host settings (DNS, port, Traefik labels and network, HA SSH key) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. On the production server, the HomeLab Ansible deploy writes the override. It must never write the tracked `docker-compose.yml`, because a modified tracked file makes `git pull --ff-only` fail.
+`docker-compose.yml` is generic. Host settings (DNS, port, Traefik labels and network) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. On the production server, the HomeLab Ansible deploy writes the override. It must never write the tracked `docker-compose.yml`, because a modified tracked file makes `git pull --ff-only` fail.
 
 The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
@@ -73,7 +73,7 @@ Implemented in `scripts/generate_plan.py`:
 
 ## Home Assistant Integration
 
-The Home Assistant push and its troubleshooting steps are in the "Home Assistant" section of `README.md`. Steps for the owner's own server are in the local `deploy` skill, which is not in git.
+The Home Assistant pull (REST sensors, `HA_ENABLED`) and its troubleshooting steps are in the "Home Assistant" section of `README.md`. Steps for the owner's own server are in the local `deploy` skill, which is not in git.
 
 ## Deployment Gotchas
 
@@ -89,7 +89,7 @@ The Home Assistant push and its troubleshooting steps are in the "Home Assistant
 - `pipeline.sh` has all shared logic; `fetch.sh` and `fetch_docker.sh` are thin wrappers
 - Plan is regenerated from scratch every pipeline run — no manual editing of `plan.json`
 - Plan staged to `$DATA_DIR/plan.json`, only published to `$SITE_DIR` when complete with notes. `DATA_DIR` defaults to `/data`. `SITE_DIR` defaults to `$DATA_DIR/site`. `bash fetch.sh` sets them to the `data/` and `site/` folders of the repo. `docker-compose.yml` sets `/app/data`, `/app/site` and `PLAN_CONFIG=/app/config/plan.yaml` until #112.
-- `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR`, `PLAN_CONFIG` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid, and `<FEATURE>_ENABLED` is not set to false or to a value that is not valid. An `op://` value counts as not resolved.
+- `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR`, `PLAN_CONFIG` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid, and `<FEATURE>_ENABLED` is not set to false or to a value that is not valid. A feature with no settings (`home_assistant`) turns on only when its flag is a true value (`true`, `1` or `yes`). An `op://` value counts as not resolved.
 - Shared utilities in `scripts/wine_utils.py` — do not duplicate `urgency_score`, `normalize`, `TYPE_TO_BADGE`, or `CURRENT_YEAR` in individual scripts
 - Composite scoring in `scripts/scoring.py` — `composite_score()` combines: window position (50%), seasonal fit (25%), diversity (10%), CT quality (10%), community signals (5%). Lower score = schedule sooner.
 - Community signals use RSS note data: recent score drift, note velocity, text-based window drift detection
