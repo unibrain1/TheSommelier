@@ -43,24 +43,32 @@ It turns on when `SMTP_USERNAME`, `SMTP_PASSWORD` and `DIGEST_RECIPIENTS` are al
 
 Claude writes a short tasting note for each bottle. It also reads the menu text to improve the pairings. Without Claude, the notes are empty and the pairings use keyword matching.
 
-It turns on when `CLAUDE_CODE_OAUTH_TOKEN` is set. See [Claude login](#claude-login) to make the token.
+There are three choices. Set at most one key.
+
+| Choice | Key to set | Keys to leave unset |
+| --- | --- | --- |
+| No Claude | none | `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` |
+| Subscription | `CLAUDE_CODE_OAUTH_TOKEN` | `ANTHROPIC_API_KEY` |
+| API | `ANTHROPIC_API_KEY` | `CLAUDE_CODE_OAUTH_TOKEN` |
+
+If you set both keys, the feature is off. The sync runs without notes and logs a warning that names both keys. Each sync logs the choice: `claude: on (subscription)`, `claude: on (API key)` or `claude: off` with the reason.
 
 | Key | Kind | Default |
 | --- | --- | --- |
 | `CLAUDE_CODE_OAUTH_TOKEN` | secret | none |
-| `CLAUDE_ENABLED` | flag | on when the token is set |
+| `ANTHROPIC_API_KEY` | secret | none |
 
 ### Claude login
 
-The container logs in with a token. The token uses your Claude subscription.
+For the subscription, the container logs in with a token. The runs use your Claude subscription.
 
 1. On a computer where you are logged in to Claude Code, run `claude setup-token`.
 2. Put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN`. Remove the `# ` from its line in `compose.yaml`.
 3. Run `docker compose down && docker compose up -d`.
 
-Do not set `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`. The `claude` CLI uses them before the token, so the runs go on the API bill and not on your subscription.
-
 The token expires one year after you make it. After that, the sync continues with empty notes. Make a new token and replace the value.
+
+For the API, put your Anthropic API key in `.env` as `ANTHROPIC_API_KEY`. Remove the `# ` from its line in `compose.yaml`. Then run `docker compose down && docker compose up -d`. The runs go on your API bill.
 
 ## CellarTracker community notes
 

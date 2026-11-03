@@ -653,23 +653,58 @@ def _stub_claude(root: Path) -> str:
     return str(claude_bin)
 
 
-def test_pipeline_claude_gate_on_runs_both_steps(harness):
+@pytest.mark.parametrize(
+    ("key", "mode"),
+    [
+        ("CLAUDE_CODE_OAUTH_TOKEN", "subscription"),
+        ("ANTHROPIC_API_KEY", "API key"),
+    ],
+)
+def test_pipeline_claude_gate_on_runs_both_steps(harness, key, mode):
     path = _stub_claude(harness.root) + os.pathsep + harness.path
 
     result = harness.run(
         "fetch_docker.sh",
-        extra={"PATH": path, "CLAUDE_CODE_OAUTH_TOKEN": "oauth-canary-9d2c"},
+        extra={"PATH": path, key: "key-canary-9d2c"},
     )
 
     assert result.returncode == 0, _output(result)
+    assert f"claude: on ({mode})" in result.stdout + result.stderr
     assert "Generating tasting notes" in result.stdout
     assert "Enriching menu entries" in result.stdout
     assert "Skipping note generation" not in result.stdout
-    assert "oauth-canary-9d2c" not in result.stdout + result.stderr
+    assert "key-canary-9d2c" not in result.stdout + result.stderr
     _assert_site_files(Path(harness.env["SITE_DIR"]))
 
 
-def test_pipeline_claude_gate_off_when_flag_false(harness):
+def test_pipeline_claude_gate_off_when_both_keys_set(harness):
+    """A wrong key setting turns notes off, but the plan still publishes."""
+    path = _stub_claude(harness.root) + os.pathsep + harness.path
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            "PATH": path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "oauth-canary-9d2c",
+            "ANTHROPIC_API_KEY": "apikey-canary-4f1a",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "Sync complete" in result.stdout
+    assert "Claude feature is off" in result.stdout
+    # The operator must see why the notes are off.
+    output = result.stdout + result.stderr
+    assert "WARNING: claude is off (both ANTHROPIC_API_KEY" in output
+    assert "CLAUDE_CODE_OAUTH_TOKEN are set" in output
+    assert "Generating tasting notes" not in result.stdout
+    assert "Enriching menu entries" not in result.stdout
+    assert "oauth-canary-9d2c" not in result.stdout + result.stderr
+    assert "apikey-canary-4f1a" not in result.stdout + result.stderr
+    _assert_site_files(Path(harness.env["SITE_DIR"]))
+
+
+def test_pipeline_removed_claude_flag_does_not_turn_notes_off(harness):
     path = _stub_claude(harness.root) + os.pathsep + harness.path
 
     result = harness.run(
@@ -682,9 +717,9 @@ def test_pipeline_claude_gate_off_when_flag_false(harness):
     )
 
     assert result.returncode == 0, _output(result)
-    assert "Claude feature is off" in result.stdout
-    assert "Generating tasting notes" not in result.stdout
-    assert "Enriching menu entries" not in result.stdout
+    assert "Generating tasting notes" in result.stdout
+    assert "Enriching menu entries" in result.stdout
+    assert "Claude feature is off" not in result.stdout
 
 
 def test_pipeline_claude_gate_off_without_token_even_with_cli(harness):

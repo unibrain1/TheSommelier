@@ -14,6 +14,8 @@ Each optional feature has its own section in [Optional features](features.md). E
 
 A feature turns on when all its settings are present and valid. `<FEATURE>_ENABLED` is the on/off flag. It accepts `true`, `false`, `1`, `0`, `yes` and `no`. `false`, `0` and `no` turn the feature off. An empty value or any other value also turns it off and logs a warning. Home Assistant is the exception: it has no other setting and turns on only when `HA_ENABLED` is `true`, `1` or `yes`.
 
+Claude has no flag. Set one of its two keys, or neither. The [choice table](features.md#claude-tasting-notes-and-menu-enrichment) shows the three choices.
+
 In `compose.yaml`, a secret is a line with `${NAME}`. Compose reads its value from `.env` or the host environment. Edit every other optional value in `compose.yaml`. To use an optional line, remove the `# ` from it.
 
 Choose how the values reach The Sommelier:
@@ -43,8 +45,8 @@ Do not commit `.env`. Git ignores it.
 | `SMTP_FROM` | value of `SMTP_USERNAME` | No | Digest email. Sender address. |
 | `DIGEST_ENABLED` | on when its settings are set | No | `false` stops the email. |
 | `SITE_URL` | none | No | Public URL of your site. The digest email may use it to show the logo. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | none | For notes | Claude notes and menu enrichment. On when the token is set. See [Claude login](features.md#claude-login). |
-| `CLAUDE_ENABLED` | on when the token is set | No | `false` turns off the Claude notes and the menu enrichment. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | none | For notes | Claude notes and menu enrichment with your Claude subscription. Set at most one Claude key. See [Claude login](features.md#claude-login). |
+| `ANTHROPIC_API_KEY` | none | For notes | Claude notes and menu enrichment on your API bill. Set at most one Claude key. See [Claude login](features.md#claude-login). |
 | `CT_COMMUNITY_NOTES_RSS` | none | For community notes | Community notes. RSS URL of the CellarTracker notes feed. It holds a token. |
 | `COMMUNITY_NOTES_ENABLED` | on when the URL is set | No | `false` turns off the community notes. |
 | `HEALTHCHECK_PING_KEY` | none | For the ping | Healthchecks.io. On when the key is set. |

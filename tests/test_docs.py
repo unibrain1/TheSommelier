@@ -11,8 +11,8 @@ import settings
 
 REPO = Path(__file__).resolve().parent.parent
 
-# settings.py names this one only to warn a host that still sets it.
-REMOVED_VARS = {"HA_SSH_TARGET"}
+# settings.py names these only to warn a host that still sets them.
+REMOVED_VARS = {"HA_SSH_TARGET", "CLAUDE_ENABLED"}
 # Scripts read these outside settings.py, which does not own them.
 SHELL_VARS = {"SYNC_SCHEDULE", "DIGEST_SEND_SCHEDULE", "TZ"}
 UPPER_NAME = re.compile(r"""["']([A-Z][A-Z0-9_]{2,})["']""")
@@ -23,17 +23,20 @@ SAMPLES = (
     "docker-compose.override.yml.sample",
     "config/plan.yaml.sample",
 )
-STALE = re.compile(r"\bgit\s+pull\b|\bop\s+read\b|\bHA_SSH_TARGET\b", re.I)
+STALE = re.compile(
+    r"\bgit\s+pull\b|\bop\s+read\b|\bHA_SSH_TARGET\b|\bCLAUDE_ENABLED\b", re.I
+)
 # The code reads these, but a user never sets them. The docs and the samples
-# must not list them: the image fixes the folders. Only the Claude login
-# section may name the Anthropic variables, to tell the user not to set them.
+# must not list them: the image fixes the folders. ANTHROPIC_AUTH_TOKEN is
+# for gateways and is not a Claude choice. settings.py names it only to warn.
 INTERNAL_VARS = {
     "DATA_DIR",
     "SITE_DIR",
     "PLAN_CONFIG",
-    "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
 }
+CLAUDE_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
+ONE_KEY_COMMENT = "set one of the two keys, or neither"
 UPGRADE_PAGE = "docs/upgrade-from-v3.md"
 
 
@@ -311,16 +314,43 @@ def test_the_user_docs_and_samples_do_not_name_internal_variables():
     names = ["README.md", *SAMPLES]
     names += [p.relative_to(REPO).as_posix() for p in (REPO / "docs").glob("*.md")]
     # docker-compose.yml is not a user doc: it sets the folders for the build.
-    # The Claude login section warns the user not to set the Anthropic variables.
-    allowed = {
-        ("docs/features.md", "ANTHROPIC_API_KEY"),
-        ("docs/features.md", "ANTHROPIC_AUTH_TOKEN"),
-    }
     found = {
         (name, var)
         for name in names
         for var in INTERNAL_VARS
         if re.search(rf"\b{var}\b", _text(name))
-    } - allowed
+    }
 
     assert sorted(found) == []
+
+
+def test_the_claude_choice_table_has_the_three_choices():
+    section = _section(
+        _text("docs/features.md"), "## Claude tasting notes and menu enrichment"
+    )
+    rows = {
+        cells[0]: cells[1:]
+        for cells in (
+            [c.strip() for c in line.strip("|").split("|")]
+            for line in section.splitlines()
+            if line.startswith("|")
+        )
+    }
+    token, api_key = (f"`{name}`" for name in CLAUDE_KEYS)
+
+    assert "Set at most one key." in section
+    assert rows["No Claude"][0] == "none"
+    assert token in rows["No Claude"][1] and api_key in rows["No Claude"][1]
+    assert rows["Subscription"] == [token, api_key]
+    assert rows["API"] == [api_key, token]
+
+
+@pytest.mark.parametrize("sample", (".env.sample", "examples/compose.yaml"))
+def test_the_sample_says_to_set_one_claude_key_or_neither(sample):
+    # The comment must sit next to the two key lines, not elsewhere in the file.
+    lines = _text(sample).splitlines()
+    comment = next(i for i, line in enumerate(lines) if ONE_KEY_COMMENT in line.lower())
+    nearby = "\n".join(lines[comment : comment + 8])
+
+    for name in CLAUDE_KEYS:
+        assert re.search(rf"^\s*#?\s?{name}[=:]", nearby, re.M), name

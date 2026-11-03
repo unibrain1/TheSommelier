@@ -28,7 +28,7 @@ Before v4.0.0 the container ran from a repo checkout on the host. It updated its
    ```
 
    `compose.yaml` sets the project name `the-sommelier`, so the volume is always `the-sommelier_sommelier-data`. The first `docker compose up` warns that the volume was not made by Compose. This is expected.
-5. **Claude.** Make a token with `claude setup-token`, and set `CLAUDE_CODE_OAUTH_TOKEN`. See [Claude login](features.md#claude-login).
+5. **Claude.** Make a token with `claude setup-token`, and set `CLAUDE_CODE_OAUTH_TOKEN`. To use the API bill instead, set `ANTHROPIC_API_KEY`. Set one key only. See [Claude login](features.md#claude-login).
 6. **Home Assistant.** The SSH push is gone. Set `HA_ENABLED: "true"` in `compose.yaml`, then change the `resource` of each REST sensor from the local URL of the `/config/www` files to the two site URLs in [Home Assistant](home-assistant.md). Then do these steps:
    1. Go to Developer Tools → Actions and run `rest.reload`.
    2. Remove `HA_SSH_TARGET` from `.env`. Remove the `ha_ssh_key` mount from `docker-compose.override.yml`.

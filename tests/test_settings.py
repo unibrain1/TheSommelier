@@ -27,7 +27,6 @@ FEATURES = {
             "DIGEST_RECIPIENTS": "SECRET-canary-rcpt@example.com",
         },
     ),
-    "claude": ("CLAUDE_ENABLED", {"CLAUDE_CODE_OAUTH_TOKEN": "SECRET-canary-oauth"}),
     "community_notes": (
         "COMMUNITY_NOTES_ENABLED",
         {"CT_COMMUNITY_NOTES_RSS": "https://example.com/SECRET-canary-rss"},
@@ -42,10 +41,23 @@ FEATURES = {
 # Features with no settings to check. Only the flag can turn them on.
 OPT_IN = {"home_assistant": "HA_ENABLED"}
 
+# The claude feature has no flag. Its keys choose a mode.
+API_KEY = "SECRET-canary-api-key"
+OAUTH = "SECRET-canary-oauth"
+CLAUDE_VALUES = {
+    "api_key": {"ANTHROPIC_API_KEY": API_KEY},
+    "subscription": {"CLAUDE_CODE_OAUTH_TOKEN": OAUTH},
+}
+CLAUDE_LOG = {
+    "api_key": "claude: on (API key)",
+    "subscription": "claude: on (subscription)",
+}
+CREDENTIALS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
+
 
 def test_local_feature_list_matches_settings():
     """A feature added to settings.FEATURES needs a case in this file."""
-    assert set(FEATURES) | set(OPT_IN) == set(settings.FEATURES)
+    assert set(FEATURES) | set(OPT_IN) | {"claude"} == set(settings.FEATURES)
 
 
 REQUIRED_VALUES = {
@@ -84,7 +96,7 @@ def run_cli(args, values=None):
 
 
 def all_canaries():
-    values = list(REQUIRED_VALUES.values())
+    values = [*REQUIRED_VALUES.values(), API_KEY, OAUTH]
     for _, vs in FEATURES.values():
         values += list(vs.values())
     return values
@@ -520,12 +532,13 @@ def test_check_log_lists_every_feature_and_no_secret():
     values = dict(REQUIRED_VALUES)
     for name in FEATURES:
         values.update(feature_values(name))
-    values["ANTHROPIC_API_KEY"] = "SECRET-canary-anthropic-key"
+    values.update(CLAUDE_VALUES["subscription"])
     values["ANTHROPIC_AUTH_TOKEN"] = "SECRET-canary-anthropic-token"
     result = run_cli(["check"], values)
     assert result.returncode == 0
     for name in FEATURES:
         assert re.search(rf"^\s*{name}: on$", result.stdout, re.MULTILINE)
+    assert re.search(r"^\s*claude: on \(subscription\)$", result.stdout, re.MULTILINE)
     combined = result.stdout + result.stderr
     for canary in all_canaries():
         assert canary not in combined
@@ -535,12 +548,11 @@ def test_check_log_lists_every_feature_and_no_secret():
 def test_check_log_shows_state_of_off_features():
     values = {
         **REQUIRED_VALUES,
-        "CLAUDE_ENABLED": "false",
         "SMTP_USERNAME": "SECRET-canary-smtp-user",
     }
     result = run_cli(["check"], values)
     assert result.returncode == 0
-    assert "claude: off (disabled by CLAUDE_ENABLED)" in result.stdout
+    assert "claude: off (not configured)" in result.stdout
     assert "healthcheck: off (not configured)" in result.stdout
     assert "community_notes: off (not configured)" in result.stdout
     assert re.search(
@@ -556,13 +568,29 @@ def test_check_gives_no_warning_when_all_features_not_configured():
     assert "WARNING" not in result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("var", ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"])
-def test_check_warns_on_anthropic_var(var):
-    result = run_cli(["check"], {**REQUIRED_VALUES, var: "SECRET-canary-anthropic"})
+@pytest.mark.parametrize("extra", [{}, CLAUDE_VALUES["subscription"]])
+def test_check_warns_auth_token_is_not_used(extra):
+    values = {**REQUIRED_VALUES, **extra, "ANTHROPIC_AUTH_TOKEN": "SECRET-canary-gw"}
+    result = run_cli(["check"], values)
     assert result.returncode == 0
-    assert f"WARNING: {var} is set" in result.stderr
-    assert "CLAUDE_CODE_OAUTH_TOKEN" in result.stderr
-    assert "SECRET-canary-anthropic" not in result.stdout + result.stderr
+    lines = [ln for ln in result.stderr.splitlines() if "ANTHROPIC_AUTH_TOKEN" in ln]
+    assert len(lines) == 1
+    assert lines[0].startswith("WARNING: ANTHROPIC_AUTH_TOKEN is set. It is not used.")
+    assert "SECRET-canary" not in result.stdout + result.stderr
+
+
+def test_auth_token_alone_is_not_a_mode(clean_env):
+    clean_env.setenv("ANTHROPIC_AUTH_TOKEN", "SECRET-canary-gw")
+    assert settings.claude_mode() == "none"
+    assert settings.feature("claude").kind == "not_configured"
+
+
+def test_check_gives_no_warning_for_api_key_alone():
+    result = run_cli(["check"], {**REQUIRED_VALUES, **CLAUDE_VALUES["api_key"]})
+    assert result.returncode == 0
+    assert "claude: on (API key)" in result.stdout
+    assert "WARNING" not in result.stderr
+    assert API_KEY not in result.stdout + result.stderr
 
 
 def test_check_no_anthropic_warning_when_unset():
@@ -581,7 +609,7 @@ def test_values_read_at_call_time(clean_env, tmp_path):
     assert settings.feature("claude").on is False
     clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "t")
     assert settings.feature("claude").on is True
-    clean_env.setenv("CLAUDE_ENABLED", "false")
+    clean_env.setenv("ANTHROPIC_API_KEY", "k")
     assert settings.feature("claude").on is False
 
 
@@ -808,3 +836,166 @@ def test_removed_ssh_target_gives_warning_without_value(clean_env):
 def test_no_ssh_target_warning_when_not_set(clean_env):
     result = run_cli(["check"], REQUIRED_VALUES)
     assert "HA_SSH_TARGET" not in result.stdout + result.stderr
+
+
+# --- Claude auth mode ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("values", "mode"),
+    [
+        ({}, "none"),
+        (CLAUDE_VALUES["api_key"], "api_key"),
+        (CLAUDE_VALUES["subscription"], "subscription"),
+        ({**CLAUDE_VALUES["api_key"], **CLAUDE_VALUES["subscription"]}, "conflict"),
+        # An op:// value is a secret the host did not resolve: not set.
+        (
+            {"ANTHROPIC_API_KEY": "op://v/i/k", "CLAUDE_CODE_OAUTH_TOKEN": OAUTH},
+            "subscription",
+        ),
+        (
+            {"ANTHROPIC_API_KEY": API_KEY, "CLAUDE_CODE_OAUTH_TOKEN": "op://v/i/t"},
+            "api_key",
+        ),
+        ({"CLAUDE_CODE_OAUTH_TOKEN": "op://v/i/t"}, "none"),
+        # Compose passes an unset host variable as an empty string.
+        ({"ANTHROPIC_API_KEY": "", "CLAUDE_CODE_OAUTH_TOKEN": OAUTH}, "subscription"),
+        ({"ANTHROPIC_API_KEY": "   ", "CLAUDE_CODE_OAUTH_TOKEN": ""}, "none"),
+        ({"ANTHROPIC_AUTH_TOKEN": "SECRET-canary-gw"}, "none"),
+    ],
+)
+def test_claude_mode(values, mode):
+    assert settings.claude_mode(values) == mode
+
+
+def test_claude_mode_reads_os_environ_by_default(clean_env):
+    assert settings.claude_mode() == "none"
+    clean_env.setenv("ANTHROPIC_API_KEY", API_KEY)
+    assert settings.claude_mode() == "api_key"
+
+
+@pytest.mark.parametrize("mode", ["api_key", "subscription"])
+def test_claude_on_logs_the_mode(clean_env, mode):
+    for var, value in CLAUDE_VALUES[mode].items():
+        clean_env.setenv(var, value)
+    state = settings.feature("claude")
+    assert state.kind == "on"
+    assert state.log_line() == CLAUDE_LOG[mode]
+    result = run_cli(["check"], {**REQUIRED_VALUES, **CLAUDE_VALUES[mode]})
+    assert re.search(
+        rf"^\s*{re.escape(CLAUDE_LOG[mode])}$", result.stdout, re.MULTILINE
+    )
+    assert run_cli(["enabled", "claude"], CLAUDE_VALUES[mode]).returncode == 0
+
+
+def test_claude_off_when_no_key(clean_env):
+    state = settings.feature("claude")
+    assert state.kind == "not_configured"
+    assert state.log_line() == "claude: off (not configured)"
+    assert run_cli(["enabled", "claude"], {}).returncode == 1
+
+
+def test_claude_conflict_is_incomplete_and_names_both_keys(clean_env):
+    clean_env.setenv("ANTHROPIC_API_KEY", API_KEY)
+    clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", OAUTH)
+    state = settings.feature("claude")
+    assert state.kind == "incomplete"
+    assert "ANTHROPIC_API_KEY" in state.reason
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in state.reason
+
+
+def test_check_with_both_keys_warns_once_and_exits_zero():
+    values = {
+        **REQUIRED_VALUES,
+        **CLAUDE_VALUES["api_key"],
+        **CLAUDE_VALUES["subscription"],
+    }
+    result = run_cli(["check"], values)
+    assert result.returncode == 0
+    assert "ERROR" not in result.stderr
+    assert "claude: off" in result.stdout
+    warnings = [ln for ln in result.stderr.splitlines() if ln.startswith("WARNING")]
+    assert len(warnings) == 1
+    assert "ANTHROPIC_API_KEY" in warnings[0]
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in warnings[0]
+    assert run_cli(["enabled", "claude"], values).returncode == 1
+    assert "SECRET-canary" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("var", ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"])
+def test_check_warns_op_reference_in_claude_key(var):
+    result = run_cli(["check"], {**REQUIRED_VALUES, var: "op://vault/SECRET-canary/k"})
+    assert result.returncode == 0
+    assert "claude: off (not configured)" in result.stdout
+    assert f"WARNING: {var} is not resolved. It is not used." in result.stderr
+    assert "op run" in result.stderr
+    assert "SECRET-canary" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("flag_value", ["false", "true", "SECRET-canary-flag"])
+def test_removed_claude_flag_warns_once_and_has_no_effect(clean_env, flag_value):
+    clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", OAUTH)
+    clean_env.setenv("CLAUDE_ENABLED", flag_value)
+    assert settings.feature("claude").log_line() == "claude: on (subscription)"
+    values = {
+        **REQUIRED_VALUES,
+        **CLAUDE_VALUES["subscription"],
+        "CLAUDE_ENABLED": flag_value,
+    }
+    result = run_cli(["check"], values)
+    assert result.returncode == 0
+    lines = [ln for ln in result.stderr.splitlines() if "CLAUDE_ENABLED" in ln]
+    assert len(lines) == 1
+    assert lines[0].startswith(
+        "WARNING: CLAUDE_ENABLED is set. The flag was removed. Remove it from .env."
+    )
+    assert "SECRET-canary" not in result.stdout + result.stderr
+    assert run_cli(["enabled", "claude"], values).returncode == 0
+
+
+def test_no_claude_flag_warning_when_not_set():
+    result = run_cli(["check"], {**REQUIRED_VALUES, **CLAUDE_VALUES["subscription"]})
+    assert "CLAUDE_ENABLED" not in result.stdout + result.stderr
+
+
+ALL_CREDENTIALS = {
+    "ANTHROPIC_API_KEY": API_KEY,
+    "ANTHROPIC_AUTH_TOKEN": "SECRET-canary-gw",
+    "CLAUDE_CODE_OAUTH_TOKEN": OAUTH,
+}
+
+
+@pytest.mark.parametrize(
+    ("values", "kept"),
+    [
+        ({}, {}),
+        ({"ANTHROPIC_AUTH_TOKEN": "SECRET-canary-gw"}, {}),
+        (
+            {**CLAUDE_VALUES["api_key"], "ANTHROPIC_AUTH_TOKEN": "g"},
+            CLAUDE_VALUES["api_key"],
+        ),
+        (
+            {**CLAUDE_VALUES["subscription"], "ANTHROPIC_AUTH_TOKEN": "g"},
+            CLAUDE_VALUES["subscription"],
+        ),
+        (ALL_CREDENTIALS, {}),
+        (
+            {"ANTHROPIC_API_KEY": "op://v/i/k", "CLAUDE_CODE_OAUTH_TOKEN": OAUTH},
+            CLAUDE_VALUES["subscription"],
+        ),
+        (
+            {"ANTHROPIC_API_KEY": "", "CLAUDE_CODE_OAUTH_TOKEN": OAUTH},
+            CLAUDE_VALUES["subscription"],
+        ),
+        ({"CLAUDE_CODE_OAUTH_TOKEN": f"  {OAUTH}\n"}, CLAUDE_VALUES["subscription"]),
+    ],
+)
+def test_claude_env_holds_only_the_mode_credential(values, kept):
+    environ = {"PATH": "/usr/bin", "HOME": "/home/x", **values}
+    before = dict(environ)
+    env = settings.claude_env(environ)
+    assert {k: v for k, v in env.items() if k in CREDENTIALS} == kept
+    assert env["PATH"] == "/usr/bin"
+    assert env["HOME"] == "/home/x"
+    # The caller's mapping stays as it was.
+    assert environ == before

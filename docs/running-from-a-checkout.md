@@ -13,12 +13,16 @@ Use a checkout to develop, or to build the image yourself. To run the published 
 - A Google Calendar with meal plans — see [Menu plan setup](menu-plan.md)
 - [1Password CLI](https://developer.1password.com/docs/cli/) (`op`) — optional, only to run `op run` with secret references, see [Keep secrets in 1Password](suggestions.md#keep-secrets-in-1password)
 - [Paprika](https://www.paprikaapp.com) — optional, syncs meal plans to Google Calendar
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude`) — optional, for tasting notes. Set `CLAUDE_CODE_OAUTH_TOKEN`, see [Claude login](features.md#claude-login)
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude`) — optional, for tasting notes. Set `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, see [Claude login](features.md#claude-login). `bash fetch.sh` keeps the variables that your shell exports. An `ANTHROPIC_API_KEY` in your shell profile turns the notes on and puts the runs on your API bill.
 
 ## Set up and run
 
+The scripts run `python3`. Make a virtual environment in `.venv`, so that `python3` finds the packages when the environment is active:
+
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt pytest
 cp .env.sample .env
 cp config/plan.yaml.sample config/plan.yaml
 # Edit .env with your values (see docs/configuration.md)

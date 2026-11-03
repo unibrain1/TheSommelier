@@ -19,6 +19,8 @@ import sys
 import time
 from datetime import date
 
+import settings
+
 # Ensure TZ env var is respected before using date.today()
 if "TZ" in os.environ:
     time.tzset()
@@ -183,13 +185,28 @@ def call_claude(prompt: str) -> str:
             capture_output=True,
             text=True,
             timeout=120,
+            # Only the credential of the chosen mode. Other variables, such as
+            # the CLAUDE_CODE_USE_* provider flags, pass through unchanged.
+            env=settings.claude_env(os.environ),
         )
     except subprocess.TimeoutExpired:
         print("WARNING: Claude CLI timed out", file=sys.stderr)
         return ""
+    except FileNotFoundError as e:
+        # The CLI is not installed. Continue with empty notes, as for a timeout.
+        print(f"WARNING: Claude CLI could not start: {e}", file=sys.stderr)
+        return ""
     if result.returncode != 0:
+        # The CLI writes auth errors ("Invalid API key") to stdout, not stderr.
+        detail = result.stderr.strip() or result.stdout.strip()
+        # Mask before the cut, so that a cut cannot leave part of a key.
+        for name in settings.CLAUDE_CREDENTIALS:
+            value = os.environ.get(name, "").strip()
+            if value:
+                detail = detail.replace(value, "***")
+        detail = detail[:300]
         print(
-            f"WARNING: Claude CLI returned {result.returncode}: {result.stderr}",
+            f"WARNING: Claude CLI returned {result.returncode}: {detail}",
             file=sys.stderr,
         )
         return ""

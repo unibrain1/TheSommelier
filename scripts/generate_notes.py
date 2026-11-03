@@ -5,7 +5,10 @@ Reads plan.json and optionally CellarTracker notes/food tags and community
 notes to generate contextual tasting notes. Claude augments any existing
 CT tasting notes, community tasting notes, and food pairing data.
 
-Requires CLAUDE_CODE_OAUTH_TOKEN in the environment.
+Needs one Claude key in the environment: ANTHROPIC_API_KEY (API key mode) or
+CLAUDE_CODE_OAUTH_TOKEN (subscription mode). pipeline.sh runs this script only
+when settings.py reports the claude feature on. wine_utils.call_claude passes
+the key of the chosen mode to the CLI.
 
 Usage: generate_notes.py <plan.json> [notes.tsv] [foodtags.tsv] [community_notes.json] [inventory.json]
 """

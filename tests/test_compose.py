@@ -171,6 +171,7 @@ def test_sample_restarts_the_site_service_only(sample):
         "SMTP_USERNAME",
         "SMTP_PASSWORD",
         "CLAUDE_CODE_OAUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
         "CT_COMMUNITY_NOTES_RSS",
         "HEALTHCHECK_PING_KEY",
     ],

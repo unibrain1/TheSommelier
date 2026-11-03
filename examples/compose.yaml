@@ -83,12 +83,13 @@ x-sommelier: &sommelier
     # SITE_URL: https://sommelier.example.com
 
     # --- Tasting notes and menu enrichment (Claude) ---
-    # On when CLAUDE_CODE_OAUTH_TOKEN is set. Make the token on a computer
+    # Set one of the two keys, or neither. With both set, the notes are off.
+    # The token uses your Claude subscription. Make the token on a computer
     # where you are logged in to Claude with: claude setup-token
     # The token expires one year after you make it.
-    # The token uses your Claude subscription.
     # CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN}"
-    # CLAUDE_ENABLED: "true"
+    # The API key puts the runs on your API bill.
+    # ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
 
     # --- CellarTracker community notes ---
     # The RSS feed URL. It holds a token, so treat it as a secret.

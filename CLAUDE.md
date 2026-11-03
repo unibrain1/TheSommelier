@@ -14,7 +14,11 @@ bash fetch.sh
 
 ## Running Tests
 
-Tests require `pytest` (install via `pip install pytest`).
+Tests run from the virtual environment in `.venv` (see `docs/running-from-a-checkout.md`). The system Python can be without `pytest`.
+
+```bash
+.venv/bin/python -m pytest tests/ -v --tb=short
+```
 
 ## Docker Deployment
 
@@ -96,7 +100,7 @@ The Home Assistant pull (REST sensors, `HA_ENABLED`) and its troubleshooting ste
 - `pipeline.sh` has all shared logic; `fetch.sh` and `fetch_docker.sh` are thin wrappers
 - Plan is regenerated from scratch every pipeline run — no manual editing of `plan.json`
 - Plan staged to `$DATA_DIR/plan.json`, only published to `$SITE_DIR` when complete with notes. `DATA_DIR` defaults to `/data`. `SITE_DIR` defaults to `$DATA_DIR/site`. `bash fetch.sh` sets them to the `data/` and `site/` folders of the repo. `docker-compose.yml` sets none of them. In the container the defaults `/data`, `/data/site` and `/config/plan.yaml` apply.
-- `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR`, `PLAN_CONFIG` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid, and `<FEATURE>_ENABLED` is not set to false or to a value that is not valid. A feature with no settings (`home_assistant`) turns on only when its flag is a true value (`true`, `1` or `yes`). An `op://` value counts as not resolved.
+- `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR`, `PLAN_CONFIG` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid, and `<FEATURE>_ENABLED` is not set to false or to a value that is not valid. A feature with no settings (`home_assistant`) turns on only when its flag is a true value (`true`, `1` or `yes`). The `claude` feature has no flag. It turns on when exactly one of `ANTHROPIC_API_KEY` (API key mode) and `CLAUDE_CODE_OAUTH_TOKEN` (subscription mode) is set. With both set it is off, and `check` warns. `settings.claude_env()` gives the `claude` subprocess only the key of the chosen mode. An `op://` value counts as not resolved.
 - Shared utilities in `scripts/wine_utils.py` — do not duplicate `urgency_score`, `normalize`, `TYPE_TO_BADGE`, or `CURRENT_YEAR` in individual scripts
 - Composite scoring in `scripts/scoring.py` — `composite_score()` combines: window position (50%), seasonal fit (25%), diversity (10%), CT quality (10%), community signals (5%). Lower score = schedule sooner.
 - Community signals use RSS note data: recent score drift, note velocity, text-based window drift detection
