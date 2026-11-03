@@ -25,7 +25,7 @@ Production runs in Docker on the owner's homelab server. The commands to restart
 The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
 The image holds the code. The container runs no `git` and no `pip install`.
-A code change needs an image rebuild: run `docker compose build`, then `docker compose down` and `up`.
+A code change needs an image rebuild: run `git pull` on the host, then `docker compose build`, then `docker compose down` and `up`.
 `docker compose restart` does NOT re-run the entrypoint — use `down/up` instead.
 `restart` keeps the stored container config. `down/up` and `run-now` read both compose files when they run.
 

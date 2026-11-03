@@ -4,7 +4,9 @@
 #
 # No DATA_DIR, SITE_DIR or PLAN_CONFIG here: the defaults /data, /data/site
 # and /config/plan.yaml match the volumes below, and nginx reads the run
-# output only from /data/site.
+# output only from /data/site. The the-sommelier entrypoint stops if
+# SITE_DIR is another folder. The run-now service has no entrypoint, so it
+# does not check this.
 
 x-sommelier: &sommelier
   build: .

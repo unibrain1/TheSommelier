@@ -131,7 +131,8 @@ python3 -m http.server -d site 8080
 ### Docker (Homelab)
 
 ```bash
-# First time, or after any code change: rebuild the image
+# First time, or after any code change: pull the code, then rebuild the image
+git pull
 docker compose build
 docker compose down && docker compose up -d
 

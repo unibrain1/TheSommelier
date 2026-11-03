@@ -6,6 +6,7 @@ volume name, and removes them at the end.
 """
 
 import os
+import shutil
 import subprocess
 import time
 import uuid
@@ -189,10 +190,14 @@ def test_site_serves_index_from_image_and_plan_from_volume(sandbox, running):
     _exec(name, "bash", "-c", "echo '{\"seeded\": true}' > /data/site/plan.json")
 
     index = _exec(name, "curl", "-sf", "http://127.0.0.1:8080/index.html")
+    root = _exec(name, "curl", "-sf", "http://127.0.0.1:8080/")
     plan = _exec(name, "curl", "-sf", "http://127.0.0.1:8080/plan.json")
 
     assert index.returncode == 0
     assert "<html" in index.stdout.lower()
+    # Traefik and users open the root URL, not /index.html.
+    assert root.returncode == 0
+    assert root.stdout == index.stdout
     assert plan.returncode == 0
     assert plan.stdout.strip() == '{"seeded": true}'
 
@@ -227,6 +232,55 @@ def test_run_now_checks_settings_and_stops_at_the_fetch(sandbox):
     assert "Checking settings" in output
     assert result.returncode != 0
     assert "CellarTracker inventory fetch failed" in output
+
+
+def test_image_holds_no_secret_or_personal_file(sandbox, tmp_path):
+    # Build from a copy of the repo that holds a canary for each file that
+    # .dockerignore must keep out. The real working tree may not hold them.
+    # Only tracked files, so a private file of the developer never reaches the
+    # temp folder and the context does not change with the local tree.
+    context = tmp_path / "context"
+    tracked = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "-z"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split("\0")
+    for rel in filter(None, tracked):
+        if (REPO / rel).is_file():
+            (context / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / rel, context / rel)
+    canaries = [
+        ".env",
+        "config/plan.yaml",
+        "scripts/plan_config.py",
+        "site/plan.json",
+        "site/report.json",
+        "site/digest.html",
+        "data/state.txt",
+        "plans/canary.md",
+        ".git/HEAD",
+    ]
+    for rel in canaries:
+        path = context / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("canary\n")
+    image = f"{sandbox.image}-canary"
+    try:
+        _docker("build", "-t", image, str(context), timeout=1800)
+
+        found = [
+            rel
+            for rel in canaries
+            if _docker(
+                "run", "--rm", "--entrypoint", "test", image, "-e", f"/app/{rel}",
+                check=False,
+            ).returncode == 0
+        ]  # fmt: skip
+    finally:
+        _docker("image", "rm", "-f", image, check=False)
+
+    assert found == []
 
 
 def test_entrypoint_refuses_a_site_dir_other_than_data_site(sandbox):

@@ -49,8 +49,14 @@ def test_compose_has_no_bind_mount_of_the_repo(compose, service):
     assert volumes, f"{service} has no volumes"
 
     for volume in volumes:
-        source = volume.split(":")[0] if isinstance(volume, str) else volume["source"]
-        assert source not in (".", "./"), f"{service} mounts the repo: {volume}"
+        if isinstance(volume, str):
+            target = volume.split(":")[1]
+        else:
+            target = volume["target"]
+        # The code comes from the image. Any mount at /app brings back host code.
+        assert target != "/app" and not target.startswith("/app/"), (
+            f"{service} mounts over the code: {volume}"
+        )
 
 
 @pytest.mark.parametrize("service", SERVICES)
@@ -60,6 +66,16 @@ def test_compose_sets_no_path_environment(compose, service):
 
     for name in ("DATA_DIR", "SITE_DIR", "PLAN_CONFIG"):
         assert name not in env, f"{service} sets {name}"
+
+
+@pytest.mark.parametrize("service", SERVICES)
+def test_compose_sets_the_pacific_time_zone(compose, service):
+    # A service-level `environment:` replaces the anchor block, so a service
+    # that sets its own `environment:` must repeat TZ. Without it, supercronic
+    # reads the schedule in UTC.
+    env = compose["services"][service]["environment"]
+
+    assert env["TZ"] == "America/Los_Angeles"
 
 
 @pytest.mark.parametrize("service", SERVICES)
