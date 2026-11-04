@@ -313,33 +313,16 @@ class TestMain:
         assert smtp.instances == []
         assert not (digest_dirs[0] / "digest_last_sent.txt").exists()
 
-    def test_main_digest_disabled_does_not_send(
-        self, digest_dirs, monkeypatch, smtp, capsys
-    ):
-        set_creds(monkeypatch, DIGEST_ENABLED="false")
-        send_digest.main()
-        assert "Digest off (disabled by DIGEST_ENABLED)" in capsys.readouterr().out
-        assert smtp.instances == []
-        assert not (digest_dirs[0] / "digest_last_sent.txt").exists()
-
-    @pytest.mark.parametrize("flag", ["0", "no"])
-    def test_main_digest_disabled_message_for_other_false_values(
+    @pytest.mark.parametrize("flag", ["false", "off"])
+    def test_main_removed_flag_does_not_stop_the_email(
         self, digest_dirs, monkeypatch, smtp, capsys, flag
     ):
         set_creds(monkeypatch, DIGEST_ENABLED=flag)
         send_digest.main()
-        assert "DIGEST_ENABLED=false" not in capsys.readouterr().out
-        assert smtp.instances == []
-
-    def test_main_bad_flag_warns_and_exits_0(
-        self, digest_dirs, monkeypatch, smtp, capsys
-    ):
-        set_creds(monkeypatch, DIGEST_ENABLED="off")
-        send_digest.main()
-        err = capsys.readouterr().err
-        assert "WARNING: Digest off (not valid: DIGEST_ENABLED)" in err
-        assert smtp.instances == []
-        assert not (digest_dirs[0] / "digest_last_sent.txt").exists()
+        captured = capsys.readouterr()
+        assert len(smtp.instances) == 1
+        assert "Digest sent to" in captured.out
+        assert "Digest off" not in captured.out + captured.err
 
     def test_main_partly_refused_warns_and_marks_sent(
         self, digest_dirs, monkeypatch, smtp, capsys

@@ -96,14 +96,6 @@ def main() -> None:
     force = "--force" in sys.argv
 
     state = settings.feature("digest")
-    if state.kind == "disabled":
-        print(f"Digest off ({state.reason})")
-        return
-    # The documented rule for a flag that is not valid is "off, with a
-    # warning", so the scheduled job must not fail every day on it.
-    if state.kind == "bad_flag":
-        print(f"WARNING: Digest off ({state.reason})", file=sys.stderr)
-        return
     # No digest settings at all is a normal state (settings.py check logs it),
     # so the scheduled job must not fail on it. Partial settings still fail.
     if not dry_run and state.kind == "not_configured":

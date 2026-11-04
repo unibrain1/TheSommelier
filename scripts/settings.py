@@ -15,11 +15,11 @@ $DATA_DIR/site, and PLAN_CONFIG defaults to /config/plan.yaml.
 HEALTH_MAX_AGE_MINUTES defaults to 600. A value that is not a positive integer
 gives the default, and check logs a warning.
 
-A feature turns on when all its settings are present and valid. A feature with
-no settings (home_assistant) turns on only when its <FEATURE>_ENABLED flag is a
-true value. The claude feature has no flag. It turns on when exactly one of
-ANTHROPIC_API_KEY (API key mode) and CLAUDE_CODE_OAUTH_TOKEN (subscription
-mode) is set.
+A feature turns on when all its settings are present and valid. Only
+healthcheck and home_assistant have a <FEATURE>_ENABLED flag. A feature with no
+settings (home_assistant) turns on only when its flag is a true value. The
+claude feature turns on when exactly one of ANTHROPIC_API_KEY (API key mode)
+and CLAUDE_CODE_OAUTH_TOKEN (subscription mode) is set.
 
 Each function reads os.environ when it is called, not at import, so tests can
 change the environment with monkeypatch.
@@ -47,9 +47,14 @@ CLAUDE_CREDENTIALS = (CLAUDE_API_KEY, UNUSED_ANTHROPIC_VAR, CLAUDE_OAUTH_TOKEN)
 # The SSH push to Home Assistant was removed in v4.0.0. A host that still sets
 # this variable would otherwise see frozen sensors with no signal.
 REMOVED_HA_VAR = "HA_SSH_TARGET"
-# The key now turns the claude feature on. A host that still sets the flag to
-# false would otherwise get notes it thinks are off, with no signal.
-REMOVED_CLAUDE_VAR = "CLAUDE_ENABLED"
+# removed flag -> its feature. The settings alone turn these features on. A
+# host that still sets a flag to false would otherwise get a feature it thinks
+# is off, with no signal.
+REMOVED_FLAGS: dict[str, str] = {
+    "CLAUDE_ENABLED": "claude",
+    "DIGEST_ENABLED": "digest",
+    "COMMUNITY_NOTES_ENABLED": "community_notes",
+}
 
 DEFAULT_DATA_DIR = "/data"
 DEFAULT_PLAN_CONFIG = "/config/plan.yaml"
@@ -60,15 +65,13 @@ DEFAULT_HC_BASE_URL = "https://hc-ping.com"
 # The 8-hour night gap of the default schedule, plus 2 hours.
 DEFAULT_HEALTH_MAX_AGE_MINUTES = 600
 
-# feature -> (enable flag, settings that must be present). The claude feature
-# has no flag and its own rule in _claude_state().
+# feature -> (enable flag, settings that must be present). A feature with no
+# flag is on when its settings are. The claude feature has its own rule in
+# _claude_state().
 FEATURES: dict[str, tuple[str | None, tuple[str, ...]]] = {
-    "digest": (
-        "DIGEST_ENABLED",
-        ("SMTP_USERNAME", "SMTP_PASSWORD", "DIGEST_RECIPIENTS"),
-    ),
+    "digest": (None, ("SMTP_USERNAME", "SMTP_PASSWORD", "DIGEST_RECIPIENTS")),
     "claude": (None, (CLAUDE_API_KEY, CLAUDE_OAUTH_TOKEN)),
-    "community_notes": ("COMMUNITY_NOTES_ENABLED", ("CT_COMMUNITY_NOTES_RSS",)),
+    "community_notes": (None, ("CT_COMMUNITY_NOTES_RSS",)),
     "healthcheck": ("HEALTHCHECK_ENABLED", ("HEALTHCHECK_PING_KEY",)),
     # Home Assistant pulls the two JSON files, so the app needs no credentials.
     # With no settings to check, only the flag can turn the feature on.
@@ -91,7 +94,7 @@ ALL_VARS: tuple[str, ...] = (
     "HEALTH_MAX_AGE_MINUTES",
     UNUSED_ANTHROPIC_VAR,
     REMOVED_HA_VAR,
-    REMOVED_CLAUDE_VAR,
+    *REMOVED_FLAGS,
 )
 
 # The key and the slug are path parts of the ping URL. "/", "?" or "#" would move
@@ -302,6 +305,32 @@ def _claude_state() -> FeatureState:
     return FeatureState("claude", "on", _MODE_LABEL[mode])
 
 
+def _flag_state(name: str, flag: str, has_settings: bool) -> FeatureState | None:
+    """Apply the flag rule. None means the settings decide."""
+    flag_value = _env(flag).lower()
+    if flag in os.environ and flag_value not in _TRUE | _FALSE:
+        # An unknown value fails safe: the feature stays off.
+        return FeatureState(name, "bad_flag", f"not valid: {flag}", [flag])
+    if flag_value in _FALSE:
+        return FeatureState(name, "disabled", f"disabled by {flag}")
+    if has_settings:
+        return None
+    if flag_value in _TRUE:
+        return FeatureState(name, "on")
+    return FeatureState(name, "not_configured", f"set {flag}=true to turn on")
+
+
+def _turn_on_rule(name: str) -> str:
+    needed = FEATURES[name][1]
+    # claude needs exactly one of its keys. The others need all their settings.
+    if name == "claude":
+        return f"The claude feature is on when exactly one of {' and '.join(needed)} is set."
+    *rest, last = needed
+    if not rest:
+        return f"The {name} feature is on when {last} is set."
+    return f"The {name} feature is on when {', '.join(rest)} and {last} are set."
+
+
 def feature(name: str) -> FeatureState:
     """Apply the on/off rule to one feature."""
     if name not in FEATURES:
@@ -309,18 +338,10 @@ def feature(name: str) -> FeatureState:
     if name == "claude":
         return _claude_state()
     flag, needed = FEATURES[name]
-    assert flag is not None  # only claude has no flag
-
-    flag_value = _env(flag).lower()
-    if flag in os.environ and flag_value not in _TRUE | _FALSE:
-        # An unknown value fails safe: the feature stays off.
-        return FeatureState(name, "bad_flag", f"not valid: {flag}", [flag])
-    if flag_value in _FALSE:
-        return FeatureState(name, "disabled", f"disabled by {flag}")
-    if not needed:
-        if flag_value in _TRUE:
-            return FeatureState(name, "on")
-        return FeatureState(name, "not_configured", f"set {flag}=true to turn on")
+    if flag is not None:
+        state = _flag_state(name, flag, has_settings=bool(needed))
+        if state is not None:
+            return state
 
     present = [v for v in needed if _present(v)]
     if not present:
@@ -423,12 +444,13 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
             "Remove it from .env. To feed the Home Assistant sensors, set "
             "HA_ENABLED=true and change the sensors to read the site URLs."
         )
-    if _env(REMOVED_CLAUDE_VAR):
-        warnings.append(
-            f"WARNING: {REMOVED_CLAUDE_VAR} is set. The flag was removed. "
-            "Remove it from .env. The claude feature is on when "
-            f"{CLAUDE_API_KEY} or {CLAUDE_OAUTH_TOKEN} is set."
-        )
+    for var, name in REMOVED_FLAGS.items():
+        # An empty value counts: before the removal, it turned the feature off.
+        if var in os.environ:
+            warnings.append(
+                f"WARNING: {var} is set. The flag was removed. "
+                f"Remove it from .env. {_turn_on_rule(name)}"
+            )
     errors = [
         f"ERROR: Required variable {n} is missing or not resolved" for n in required()
     ]
