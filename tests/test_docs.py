@@ -13,6 +13,13 @@ REPO = Path(__file__).resolve().parent.parent
 
 # settings.py names these only to warn a host that still sets them.
 REMOVED_VARS = {"HA_SSH_TARGET", *settings.REMOVED_FLAGS}
+# HEALTHCHECK_URL replaced these. settings.py ignores them and does not name them.
+OLD_HEALTHCHECK_VARS = {
+    "HEALTHCHECK_PING_KEY",
+    "HEALTHCHECK_SLUG",
+    "HEALTHCHECK_BASE_URL",
+    "HEALTHCHECK_ENABLED",
+}
 # Scripts read these outside settings.py, which does not own them.
 SHELL_VARS = {"SYNC_SCHEDULE", "DIGEST_SEND_SCHEDULE", "TZ"}
 UPPER_NAME = re.compile(r"""["']([A-Z][A-Z0-9_]{2,})["']""")
@@ -25,7 +32,7 @@ SAMPLES = (
 )
 STALE = re.compile(
     "|".join([r"\bgit\s+pull\b", r"\bop\s+read\b"])
-    + "".join(rf"|\b{name}\b" for name in sorted(REMOVED_VARS)),
+    + "".join(rf"|\b{name}\b" for name in sorted(REMOVED_VARS | OLD_HEALTHCHECK_VARS)),
     re.I,
 )
 # The code reads these, but a user never sets them. The docs and the samples
@@ -158,7 +165,7 @@ def test_the_code_reads_the_variables_this_test_expects():
     names = _code_env_names()
 
     # A broken regex must not pass with an empty or small list.
-    assert len(names) >= 25
+    assert len(names) >= 23
     assert {"USERNAME", "CLAUDE_CODE_OAUTH_TOKEN", "HA_ENABLED", "TZ"} <= names
     assert INTERNAL_VARS <= names, "an internal variable is gone: update INTERNAL_VARS"
     assert not names & REMOVED_VARS

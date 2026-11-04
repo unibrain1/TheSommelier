@@ -237,8 +237,7 @@ def _output(result: subprocess.CompletedProcess) -> str:
 
 def _enable_healthcheck(h: Harness) -> dict[str, str]:
     return {
-        "HEALTHCHECK_PING_KEY": KEY_CANARY,
-        "HEALTHCHECK_BASE_URL": h.server.base_url,
+        "HEALTHCHECK_URL": f"{h.server.base_url}/{KEY_CANARY}/the-sommelier",
     }
 
 
@@ -374,11 +373,27 @@ def test_pipeline_success_sends_ping(harness):
     assert result.returncode == 0, _output(result)
     assert harness.curl_urls()
     assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier"]
+    assert "healthcheck: on" in result.stdout
     body = harness.server.posts[0][1]
     assert f"Bottles: {BOTTLES}" in body
     assert "Weeks planned: 52" in body
     assert KEY_CANARY not in result.stdout
     assert KEY_CANARY not in result.stderr
+
+
+def test_pipeline_ignores_the_old_healthcheck_variables(harness):
+    old = {
+        "HEALTHCHECK_PING_KEY": KEY_CANARY,
+        "HEALTHCHECK_SLUG": "the-sommelier",
+        "HEALTHCHECK_BASE_URL": harness.server.base_url,
+        "HEALTHCHECK_ENABLED": "true",
+    }
+    result = harness.run("fetch_docker.sh", extra=old)
+
+    assert result.returncode == 0, _output(result)
+    assert harness.server.paths == []
+    assert "healthcheck: off (not configured)" in result.stdout
+    assert "HEALTHCHECK_" not in result.stdout + result.stderr
 
 
 def test_pipeline_community_notes_off_and_on(harness):

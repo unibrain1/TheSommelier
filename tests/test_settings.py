@@ -32,14 +32,10 @@ FEATURES = {
         {"CT_COMMUNITY_NOTES_RSS": "https://example.com/SECRET-canary-rss"},
     ),
     "healthcheck": (
-        "HEALTHCHECK_ENABLED",
-        {"HEALTHCHECK_PING_KEY": "SECRET-canary-hckey"},
+        None,
+        {"HEALTHCHECK_URL": "https://hc-ping.com/SECRET-canary-hckey/the-sommelier"},
     ),
 }
-
-
-# Features in FEATURES that also have an on/off flag.
-FLAGGED = [name for name, (flag, _) in FEATURES.items() if flag]
 
 # Features with no settings to check. Only the flag can turn them on.
 OPT_IN = {"home_assistant": "HA_ENABLED"}
@@ -61,6 +57,13 @@ CREDENTIALS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_T
 def test_local_feature_list_matches_settings():
     """A feature added to settings.FEATURES needs a case in this file."""
     assert set(FEATURES) | set(OPT_IN) | {"claude"} == set(settings.FEATURES)
+
+
+def test_a_feature_with_a_flag_has_no_settings():
+    # feature() applies only the flag rule to a feature that has a flag. A flag
+    # on a feature with settings would make those settings have no effect.
+    for name, (flag, needed) in settings.FEATURES.items():
+        assert not (flag and needed), name
 
 
 def test_local_flags_match_settings():
@@ -138,59 +141,6 @@ class TestFeatureRule:
         assert state.log_line() == f"{name}: off (not configured)"
 
 
-@pytest.mark.parametrize("name", FLAGGED)
-class TestFlagRule:
-    @pytest.mark.parametrize("flag_value", ["false", "False", "FALSE", "0", "no", "NO"])
-    def test_off_when_flag_false(self, clean_env, name, flag_value):
-        flag = FEATURES[name][0]
-        set_feature(clean_env, name)
-        clean_env.setenv(flag, flag_value)
-        state = settings.feature(name)
-        assert state.on is False
-        assert not state.problems
-        assert state.log_line() == f"{name}: off (disabled by {flag})"
-
-    def test_flag_false_wins_when_nothing_else_set(self, clean_env, name):
-        flag = FEATURES[name][0]
-        clean_env.setenv(flag, "false")
-        assert settings.feature(name).log_line() == f"{name}: off (disabled by {flag})"
-
-    @pytest.mark.parametrize("flag_value", ["true", "True", "TRUE", "1", "yes", "YES"])
-    def test_on_when_present_and_flag_true(self, clean_env, name, flag_value):
-        flag = FEATURES[name][0]
-        set_feature(clean_env, name)
-        clean_env.setenv(flag, flag_value)
-        assert settings.feature(name).on is True
-
-    def test_flag_true_without_settings_stays_off(self, clean_env, name):
-        flag = FEATURES[name][0]
-        clean_env.setenv(flag, "true")
-        assert settings.feature(name).on is False
-
-    @pytest.mark.parametrize("flag_value", ["maybe", "2", "", "   ", "tru"])
-    def test_unknown_flag_value_gives_off_with_warning(
-        self, clean_env, name, flag_value
-    ):
-        flag = FEATURES[name][0]
-        set_feature(clean_env, name)
-        clean_env.setenv(flag, flag_value)
-        state = settings.feature(name)
-        assert state.on is False
-        assert state.problems
-        assert state.problems == [flag]
-        result = run_cli(
-            ["check"], {**REQUIRED_VALUES, **feature_values(name), flag: flag_value}
-        )
-        assert result.returncode == 0
-        assert re.search(rf"WARNING: {name} is off.*{flag}", result.stderr)
-
-    @pytest.mark.parametrize("flag_value", ["maybe", "2", ""])
-    def test_enabled_exit_code_one_for_unknown_flag(self, clean_env, name, flag_value):
-        flag = FEATURES[name][0]
-        result = run_cli(["enabled", name], {**feature_values(name), flag: flag_value})
-        assert result.returncode == 1
-
-
 @pytest.mark.parametrize(("name", "missing"), MULTI)
 def test_partial_settings_give_off_with_warning_naming_variables(
     clean_env, name, missing
@@ -233,7 +183,7 @@ def test_op_reference_gives_off_with_warning(clean_env, name, var):
 
 
 def test_only_op_reference_set_is_not_silently_not_configured(clean_env):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "op://vault/item/key")
+    clean_env.setenv("HEALTHCHECK_URL", "op://vault/item/url")
     state = settings.feature("healthcheck")
     assert state.on is False
     assert state.problems
@@ -394,120 +344,116 @@ def test_recipients_with_only_separators_count_as_missing(clean_env, recipients)
 # --- Healthchecks -------------------------------------------------------
 
 
-def test_healthcheck_defaults_and_url_build(clean_env):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "KEY1")
-    assert settings.healthcheck_url() == "https://hc-ping.com/KEY1/the-sommelier"
-
-
-def test_healthcheck_custom_base_and_slug(clean_env):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "KEY1")
-    clean_env.setenv("HEALTHCHECK_BASE_URL", "http://hc.example.test:8000")
-    clean_env.setenv("HEALTHCHECK_SLUG", "my-slug")
-    assert settings.healthcheck_url() == "http://hc.example.test:8000/KEY1/my-slug"
+HC_KEY = "SECRET-canary-hckey"
 
 
 @pytest.mark.parametrize(
-    "base", ["https://hc.example.test/", "https://hc.example.test///"]
-)
-def test_healthcheck_trailing_slash_gives_no_double_slash(clean_env, base):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "KEY1")
-    clean_env.setenv("HEALTHCHECK_BASE_URL", base)
-    url = settings.healthcheck_url()
-    assert url == "https://hc.example.test/KEY1/the-sommelier"
-    assert "//" not in url.split("://", 1)[1]
-
-
-@pytest.mark.parametrize("base", ["ftp://x", "hc-ping.com", "javascript:x", "http://"])
-def test_healthcheck_invalid_base_turns_feature_off(clean_env, base):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "SECRET-canary-hckey")
-    clean_env.setenv("HEALTHCHECK_BASE_URL", base)
-    state = settings.feature("healthcheck")
-    assert state.on is False
-    assert state.problems == ["HEALTHCHECK_BASE_URL"]
-    assert settings.healthcheck_url() is None
-
-
-@pytest.mark.parametrize("slug", ["a/b", "a b", "a\tb", "/x"])
-def test_healthcheck_invalid_slug_turns_feature_off(clean_env, slug):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "SECRET-canary-hckey")
-    clean_env.setenv("HEALTHCHECK_SLUG", slug)
-    state = settings.feature("healthcheck")
-    assert state.on is False
-    assert state.problems == ["HEALTHCHECK_SLUG"]
-    assert settings.healthcheck_url() is None
-
-
-@pytest.mark.parametrize(
-    "base",
+    "url",
     [
-        "http://[bad",
-        "https://h:99999",
-        "https://h:abc",
-        "https://h/?q=",
-        "https://h/#x",
-        "https://h:0",
-        "https://h/path?",
-        "https://h/path#",
+        f"https://hc-ping.com/{HC_KEY}/the-sommelier",
+        f"https://hc-ping.com/{HC_KEY}",
+        f"http://hc.example.test:8000/ping/{HC_KEY}",
+        f"https://h.example.test:65535/{HC_KEY}",
+    ],
+    ids=["key_and_slug", "uuid", "self_hosted_prefix", "max_port"],
+)
+def test_healthcheck_url_is_used_as_given(clean_env, url):
+    clean_env.setenv("HEALTHCHECK_URL", url)
+    assert settings.feature("healthcheck").on is True
+    assert settings.healthcheck_url() == url
+    assert settings.healthcheck_url("fail") == url + "/fail"
+
+
+@pytest.mark.parametrize("suffix", ["/", "///"])
+def test_healthcheck_trailing_slash_gives_no_double_slash(clean_env, suffix):
+    clean_env.setenv("HEALTHCHECK_URL", f"https://hc.example.test/{HC_KEY}{suffix}")
+    assert settings.healthcheck_url() == f"https://hc.example.test/{HC_KEY}"
+    assert settings.healthcheck_url("fail") == f"https://hc.example.test/{HC_KEY}/fail"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"ftp://x/{HC_KEY}",
+        f"hc-ping.com/{HC_KEY}",
+        f"javascript:{HC_KEY}",
+        "http://",
+        f"http://[bad/{HC_KEY}",
+        f"https://h:99999/{HC_KEY}",
+        f"https://h:70000/{HC_KEY}",
+        f"https://h:abc/{HC_KEY}",
+        f"https://h:0/{HC_KEY}",
+        f"https://h/{HC_KEY}?q=",
+        f"https://h/{HC_KEY}#x",
+        f"https://h/{HC_KEY}?",
+        f"https://h/{HC_KEY}#",
+        f"https://h/{HC_KEY} x",
+        f"https://h/{HC_KEY}\nx",
+        f"https://h/{HC_KEY}\tx",
+        f"https://h/{HC_KEY}\x01x",
+        f"https://h/{HC_KEY}\x7fx",
+        f"https://h/{HC_KEY}\u00e9",
+        f"https://h/{HC_KEY}\u200bx",
+        f"https://h/{HC_KEY}\u00a0x",
+        f"https://h\u00e9.test/{HC_KEY}",
     ],
 )
-def test_healthcheck_base_url_rejected_cases_turn_feature_off(clean_env, base):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "SECRET-canary-hckey")
-    clean_env.setenv("HEALTHCHECK_BASE_URL", base)
+def test_healthcheck_rejected_url_turns_feature_off_without_value(clean_env, url):
+    clean_env.setenv("HEALTHCHECK_URL", url)
     state = settings.feature("healthcheck")
     assert state.on is False
-    assert state.problems == ["HEALTHCHECK_BASE_URL"]
-    assert "HEALTHCHECK_BASE_URL" in state.reason
+    assert state.kind == "incomplete"
+    assert state.problems == ["HEALTHCHECK_URL"]
+    assert (
+        state.log_line() == "healthcheck: off (missing or not valid: HEALTHCHECK_URL)"
+    )
     assert settings.healthcheck_url() is None
     assert settings.healthcheck_url("fail") is None
-
-
-def test_healthcheck_base_url_with_valid_port_and_path_is_kept(clean_env):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "KEY1")
-    clean_env.setenv("HEALTHCHECK_BASE_URL", "https://h.example.test:65535/ping")
-    assert (
-        settings.healthcheck_url("fail")
-        == "https://h.example.test:65535/ping/KEY1/the-sommelier/fail"
-    )
-
-
-@pytest.mark.parametrize("slug", ["a?b", "a#b", "a.b", "..", ".", "a%2Fb", "é"])
-def test_healthcheck_slug_outside_allowed_set_turns_feature_off(clean_env, slug):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "KEY1")
-    clean_env.setenv("HEALTHCHECK_SLUG", slug)
-    state = settings.feature("healthcheck")
-    assert state.on is False
-    assert state.problems == ["HEALTHCHECK_SLUG"]
-    assert settings.healthcheck_url() is None
-
-
-@pytest.mark.parametrize("slug", ["abc", "A_b-9", "0"])
-def test_healthcheck_slug_in_allowed_set_is_used(clean_env, slug):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "KEY1")
-    clean_env.setenv("HEALTHCHECK_SLUG", slug)
-    assert settings.healthcheck_url() == f"https://hc-ping.com/KEY1/{slug}"
-
-
-@pytest.mark.parametrize("key", ["a/b", "a?b", "a b", "a#b", "a.b", "../x"])
-def test_healthcheck_key_outside_allowed_set_turns_feature_off(clean_env, key):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", key)
-    state = settings.feature("healthcheck")
-    assert state.on is False
-    assert state.problems == ["HEALTHCHECK_PING_KEY"]
-    assert settings.healthcheck_url() is None
     # The warning names the variable and never holds the value.
-    _, warnings, _ = settings.check_lines()
-    assert any("HEALTHCHECK_PING_KEY" in w for w in warnings)
-    assert not any(key in w for w in warnings)
+    info, warnings, errors = settings.check_lines()
+    assert any("HEALTHCHECK_URL" in w for w in warnings)
+    assert HC_KEY not in "\n".join(info + warnings + errors)
 
 
-def test_healthcheck_op_key_is_reported_as_unresolved_not_as_invalid_chars(clean_env):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "op://vault/item/key")
+def test_healthcheck_op_url_is_one_unresolved_problem(clean_env):
+    clean_env.setenv("HEALTHCHECK_URL", "op://vault/item/url")
     state = settings.feature("healthcheck")
     assert state.on is False
-    assert state.problems == ["HEALTHCHECK_PING_KEY"]
+    assert state.problems == ["HEALTHCHECK_URL"]
     _, warnings, _ = settings.check_lines()
-    assert any("op://" in w for w in warnings)
+    assert any("op run" in w for w in warnings)
     assert not any("vault/item" in w for w in warnings)
+
+
+def test_healthcheck_old_variables_alone_leave_feature_not_configured():
+    # Owner decision: the old variables get no warning. The check reports "down".
+    values = {
+        **REQUIRED_VALUES,
+        "HEALTHCHECK_PING_KEY": HC_KEY,
+        "HEALTHCHECK_SLUG": "the-sommelier",
+        "HEALTHCHECK_BASE_URL": "https://hc-ping.com",
+        "HEALTHCHECK_ENABLED": "true",
+    }
+    result = run_cli(["check"], values)
+    assert result.returncode == 0
+    assert "healthcheck: off (not configured)" in result.stdout
+    assert "WARNING" not in result.stdout + result.stderr
+    assert run_cli(["enabled", "healthcheck"], values).returncode == 1
+
+
+@pytest.mark.parametrize("flag_value", ["false", "0", "no", "maybe", ""])
+def test_healthcheck_enabled_has_no_effect(clean_env, flag_value):
+    url = f"https://hc-ping.com/{HC_KEY}"
+    clean_env.setenv("HEALTHCHECK_URL", url)
+    clean_env.setenv("HEALTHCHECK_ENABLED", flag_value)
+    clean_env.setenv("HEALTHCHECK_PING_KEY", "other-key")
+    clean_env.setenv("HEALTHCHECK_BASE_URL", "ftp://x")
+    clean_env.setenv("HEALTHCHECK_SLUG", "a/b")
+    assert settings.feature("healthcheck").kind == "on"
+    assert settings.healthcheck_url() == url
+    info, warnings, _ = settings.check_lines()
+    assert any(re.fullmatch(r"\s*healthcheck: on", line) for line in info)
+    assert not any("HEALTHCHECK_" in w for w in warnings)
 
 
 def test_feature_state_is_frozen(clean_env):
@@ -535,9 +481,8 @@ def test_smtp_password_is_not_in_repr(clean_env):
     assert "SECRET-canary-smtp-user" in repr(smtp)
 
 
-def test_healthcheck_url_none_when_disabled(clean_env):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", "KEY1")
-    clean_env.setenv("HEALTHCHECK_ENABLED", "false")
+def test_healthcheck_url_none_when_not_set(clean_env):
+    assert settings.feature("healthcheck").kind == "not_configured"
     assert settings.healthcheck_url() is None
 
 
@@ -723,13 +668,7 @@ def test_enabled_exit_codes(name):
     assert on.returncode == 0
     off = run_cli(["enabled", name], {})
     assert off.returncode == 1
-    results = [on, off]
-    flag = FEATURES[name][0]
-    if flag:
-        disabled = run_cli(["enabled", name], {**feature_values(name), flag: "false"})
-        assert disabled.returncode == 1
-        results.append(disabled)
-    for result in results:
+    for result in (on, off):
         assert "SECRET-canary" not in result.stdout + result.stderr
 
 
@@ -738,13 +677,11 @@ def test_enabled_exit_codes(name):
 
 @pytest.mark.parametrize(
     "flag_value, kind",
-    [("false", "disabled"), ("maybe", "bad_flag"), (None, "on")],
+    [("false", "disabled"), ("maybe", "bad_flag"), ("true", "on")],
 )
 def test_kind_names_the_state_class(clean_env, flag_value, kind):
-    set_feature(clean_env, "healthcheck")
-    if flag_value is not None:
-        clean_env.setenv("HEALTHCHECK_ENABLED", flag_value)
-    assert settings.feature("healthcheck").kind == kind
+    clean_env.setenv("HA_ENABLED", flag_value)
+    assert settings.feature("home_assistant").kind == kind
 
 
 def test_kind_not_configured_and_incomplete(clean_env):

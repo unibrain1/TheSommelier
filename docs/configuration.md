@@ -12,7 +12,7 @@ Three variables are required: `USERNAME`, `PASSWORD` and `GOOGLE_CALENDAR_ICS_UR
 
 Each optional feature has its own section in [Optional features](features.md). Each sync logs the state of each feature.
 
-A feature turns on when all its settings are present and valid. To turn a feature off, remove its settings. Two features also have an on/off flag: `HEALTHCHECK_ENABLED` and `HA_ENABLED`. A flag accepts `true`, `false`, `1`, `0`, `yes` and `no`. `false`, `0` and `no` turn the feature off. An empty value or any other value also turns it off and logs a warning. Home Assistant has no other setting, so it turns on only when `HA_ENABLED` is `true`, `1` or `yes`.
+A feature turns on when all its settings are present and valid. To turn a feature off, remove its settings. One feature also has an on/off flag: `HA_ENABLED`. The flag accepts `true`, `false`, `1`, `0`, `yes` and `no`. `false`, `0` and `no` turn the feature off. An empty value or any other value also turns it off and logs a warning. Home Assistant has no other setting, so it turns on only when `HA_ENABLED` is `true`, `1` or `yes`.
 
 Claude has no flag. Set one of its two keys, or neither. The [choice table](features.md#claude-tasting-notes-and-menu-enrichment) shows the three choices.
 
@@ -47,9 +47,6 @@ Do not commit `.env`. Git ignores it.
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | For notes | Claude notes and menu enrichment with your Claude subscription. Set at most one Claude key. See [Claude login](features.md#claude-login). |
 | `ANTHROPIC_API_KEY` | none | For notes | Claude notes and menu enrichment on your API bill. Set at most one Claude key. See [Claude login](features.md#claude-login). |
 | `CT_COMMUNITY_NOTES_RSS` | none | For community notes | Community notes. RSS URL of the CellarTracker notes feed. It holds a token. |
-| `HEALTHCHECK_PING_KEY` | none | For the ping | Healthchecks.io. On when the key is set. |
-| `HEALTHCHECK_SLUG` | `the-sommelier` | No | Healthchecks.io. Name of the check. |
-| `HEALTHCHECK_BASE_URL` | `https://hc-ping.com` | No | Healthchecks.io. Base URL of the ping. |
-| `HEALTHCHECK_ENABLED` | on when the key is set | No | `false` turns off the ping. |
+| `HEALTHCHECK_URL` | none | For the ping | Healthchecks.io. The full ping URL of the check. It holds the key. On when the URL is set. |
 | `HA_ENABLED` | off | No | Home Assistant. Only `true`, `1` or `yes` turns on the Home Assistant data. |
 | `HEALTH_MAX_AGE_MINUTES` | `600` | No | Container health check. Docker marks the container as unhealthy when the plan is older than this many minutes. |

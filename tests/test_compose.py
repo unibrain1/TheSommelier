@@ -173,7 +173,7 @@ def test_sample_restarts_the_site_service_only(sample):
         "CLAUDE_CODE_OAUTH_TOKEN",
         "ANTHROPIC_API_KEY",
         "CT_COMMUNITY_NOTES_RSS",
-        "HEALTHCHECK_PING_KEY",
+        "HEALTHCHECK_URL",
     ],
 )
 def test_sample_reads_each_optional_secret_from_the_host(name):

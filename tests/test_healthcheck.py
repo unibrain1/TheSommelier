@@ -17,6 +17,7 @@ import settings
 REPO = Path(__file__).resolve().parent.parent
 KEY = "SECRET-canary-hckey"
 WARNING = "WARNING: Failed to send Healthchecks.io ping"
+UUID = "5f2a9c1e-7b3d-4e8f-a1c2-SECRET-canary"
 
 SETTING_VARS = settings.ALL_VARS
 
@@ -71,13 +72,12 @@ class PingServer:
 def server(clean_env):
     srv = PingServer()
     clean_env.setattr(healthcheck, "RETRY_DELAY_SECONDS", 0)
-    clean_env.setenv("HEALTHCHECK_BASE_URL", srv.base)
-    clean_env.setenv("HEALTHCHECK_PING_KEY", KEY)
+    clean_env.setenv("HEALTHCHECK_URL", f"{srv.base}/{KEY}/the-sommelier")
     yield srv
     srv.close()
 
 
-def test_success_posts_to_base_key_slug(server):
+def test_success_posts_to_the_url(server):
     message = "Pipeline ok\nBottles: 12 — café ✓"
     rc = healthcheck.main(["success", message])
     assert rc == 0
@@ -95,28 +95,37 @@ def test_fail_appends_fail(server):
     assert server.requests[0]["body"] == b"boom"
 
 
-def test_custom_base_and_slug(server, clean_env):
-    clean_env.setenv("HEALTHCHECK_BASE_URL", server.base + "/")
-    clean_env.setenv("HEALTHCHECK_SLUG", "my-check")
-    rc = healthcheck.main(["success", "hi"])
-    assert rc == 0
-    assert [r["path"] for r in server.requests] == [f"/{KEY}/my-check"]
-
-
 @pytest.mark.parametrize(
-    "case", ["flag_false", "no_key", "op_reference_key", "invalid_slug", "invalid_base"]
+    "path",
+    [f"/{KEY}/my-check", f"/{UUID}", f"/ping/{UUID}"],
+    ids=["key_and_slug", "uuid", "path_prefix"],
 )
-def test_disabled_makes_no_request(server, clean_env, capsys, case):
-    if case == "flag_false":
-        clean_env.setenv("HEALTHCHECK_ENABLED", "false")
-    elif case == "no_key":
-        clean_env.delenv("HEALTHCHECK_PING_KEY")
-    elif case == "op_reference_key":
-        clean_env.setenv("HEALTHCHECK_PING_KEY", "op://vault/item/key")
-    elif case == "invalid_slug":
-        clean_env.setenv("HEALTHCHECK_SLUG", "a/b")
+def test_each_url_form_is_pinged_as_given(server, clean_env, path):
+    clean_env.setenv("HEALTHCHECK_URL", server.base + path + "/")
+    assert healthcheck.main(["success", "hi"]) == 0
+    assert healthcheck.main(["fail", "hi"]) == 0
+    assert [r["path"] for r in server.requests] == [path, path + "/fail"]
+
+
+def test_old_variables_have_no_effect(server, clean_env):
+    clean_env.setenv("HEALTHCHECK_ENABLED", "false")
+    clean_env.setenv("HEALTHCHECK_SLUG", "other")
+    clean_env.setenv("HEALTHCHECK_BASE_URL", "http://127.0.0.1:1")
+    clean_env.setenv("HEALTHCHECK_PING_KEY", "other-key")
+    assert healthcheck.main(["success", "hi"]) == 0
+    assert [r["path"] for r in server.requests] == [f"/{KEY}/the-sommelier"]
+
+
+@pytest.mark.parametrize("case", ["no_url", "op_reference", "invalid_scheme"])
+def test_off_makes_no_request(server, clean_env, capsys, case):
+    if case == "no_url":
+        clean_env.delenv("HEALTHCHECK_URL")
+        # An old variable alone does not turn the feature on.
+        clean_env.setenv("HEALTHCHECK_PING_KEY", KEY)
+    elif case == "op_reference":
+        clean_env.setenv("HEALTHCHECK_URL", "op://vault/item/url")
     else:
-        clean_env.setenv("HEALTHCHECK_BASE_URL", "ftp://127.0.0.1")
+        clean_env.setenv("HEALTHCHECK_URL", f"ftp://127.0.0.1/{KEY}")
     rc = healthcheck.main(["success", "hi"])
     rc_fail = healthcheck.main(["fail", "hi"])
     assert (rc, rc_fail) == (0, 0)
@@ -146,7 +155,7 @@ def _closed_port_url():
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
     sock.close()
-    return f"http://127.0.0.1:{port}"
+    return f"http://127.0.0.1:{port}/{KEY}/the-sommelier"
 
 
 @pytest.mark.parametrize("failure", ["http_error", "timeout", "connection_refused"])
@@ -160,7 +169,7 @@ def test_key_never_in_output(server, clean_env, capsys, failure):
 
         clean_env.setattr(healthcheck.urllib.request, "urlopen", raise_timeout)
     else:
-        clean_env.setenv("HEALTHCHECK_BASE_URL", _closed_port_url())
+        clean_env.setenv("HEALTHCHECK_URL", _closed_port_url())
 
         def refuse(request, timeout=None):
             raise urllib.error.URLError(f"refused {request.full_url}")
@@ -192,7 +201,7 @@ def test_error_text_with_url_is_not_printed(server, clean_env, capsys):
 
 
 def test_timeout_is_set(clean_env):
-    clean_env.setenv("HEALTHCHECK_PING_KEY", KEY)
+    clean_env.setenv("HEALTHCHECK_URL", f"https://hc-ping.com/{KEY}")
     seen = []
 
     class Response:
@@ -225,8 +234,7 @@ def test_script_exit_codes_and_no_key_in_output(server):
     """Run the script as the pipeline does. A dead server still gives exit 0."""
     env = {
         "PATH": os.environ["PATH"],
-        "HEALTHCHECK_PING_KEY": KEY,
-        "HEALTHCHECK_BASE_URL": server.base,
+        "HEALTHCHECK_URL": f"{server.base}/{KEY}/the-sommelier",
     }
     ok = subprocess.run(
         [sys.executable, str(REPO / "scripts" / "healthcheck.py"), "success", "hi"],
@@ -237,7 +245,7 @@ def test_script_exit_codes_and_no_key_in_output(server):
     assert ok.returncode == 0
     assert [r["path"] for r in server.requests] == [f"/{KEY}/the-sommelier"]
 
-    env["HEALTHCHECK_BASE_URL"] = _closed_port_url()
+    env["HEALTHCHECK_URL"] = _closed_port_url()
     dead = subprocess.run(
         [sys.executable, str(REPO / "scripts" / "healthcheck.py"), "fail", "hi"],
         env=env,
@@ -258,16 +266,22 @@ def test_script_exit_codes_and_no_key_in_output(server):
 
 
 @pytest.mark.parametrize(
-    "base", ["http://[bad", "https://h:99999", "https://h/?q=", "https://h/#x"]
+    "url",
+    [
+        f"http://[bad/{KEY}",
+        f"https://h:99999/{KEY}",
+        f"https://h/{KEY}?q=",
+        f"https://h/{KEY}#x",
+    ],
 )
 @pytest.mark.parametrize("status", ["success", "fail"])
-def test_malformed_base_url_exits_zero_and_makes_no_request(
-    server, clean_env, capsys, monkeypatch, base, status
+def test_malformed_url_exits_zero_and_makes_no_request(
+    server, clean_env, capsys, monkeypatch, url, status
 ):
     def no_network(request, timeout=None):
         raise AssertionError("a request was made")
 
-    clean_env.setenv("HEALTHCHECK_BASE_URL", base)
+    clean_env.setenv("HEALTHCHECK_URL", url)
     monkeypatch.setattr(healthcheck.urllib.request, "urlopen", no_network)
     assert healthcheck.main([status, "hi"]) == 0
     captured = capsys.readouterr()
@@ -276,13 +290,9 @@ def test_malformed_base_url_exits_zero_and_makes_no_request(
     assert server.requests == []
 
 
-@pytest.mark.parametrize("base", ["http://[bad", "https://h:99999"])
-def test_script_with_malformed_base_url_exits_zero_without_traceback(server, base):
-    env = {
-        "PATH": os.environ["PATH"],
-        "HEALTHCHECK_PING_KEY": KEY,
-        "HEALTHCHECK_BASE_URL": base,
-    }
+@pytest.mark.parametrize("url", [f"http://[bad/{KEY}", f"https://h:99999/{KEY}"])
+def test_script_with_malformed_url_exits_zero_without_traceback(server, url):
+    env = {"PATH": os.environ["PATH"], "HEALTHCHECK_URL": url}
     result = subprocess.run(
         [sys.executable, str(REPO / "scripts" / "healthcheck.py"), "fail", "hi"],
         env=env,

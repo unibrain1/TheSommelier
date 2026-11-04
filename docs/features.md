@@ -81,16 +81,15 @@ It turns on when `CT_COMMUNITY_NOTES_RSS` is set. To turn it off, remove the set
 
 ## Healthchecks.io ping
 
-Each sync pings Healthchecks.io at the end. A successful run pings the check. A failed run pings `/fail`. The ping goes to `<HEALTHCHECK_BASE_URL>/<HEALTHCHECK_PING_KEY>/<HEALTHCHECK_SLUG>`.
+Each sync pings Healthchecks.io at the end. A successful run pings `HEALTHCHECK_URL`. A failed run pings the same URL with `/fail` added.
 
-It turns on when `HEALTHCHECK_PING_KEY` is set.
+Copy the ping URL from the page of the check on Healthchecks.io. Each form of the URL works: the UUID form, the ping key and slug form, and a self-hosted server. The URL must start with `https://` or `http://`. It must have no query (`?`), no fragment (`#`), no space, and no control or non-ASCII character. If the URL is not valid, the ping is off and the log names `HEALTHCHECK_URL`.
+
+It turns on when `HEALTHCHECK_URL` is set. To turn it off, remove the setting.
 
 | Key | Kind | Default |
 | --- | --- | --- |
-| `HEALTHCHECK_PING_KEY` | secret | none |
-| `HEALTHCHECK_SLUG` | plain | `the-sommelier` |
-| `HEALTHCHECK_BASE_URL` | plain | `https://hc-ping.com` |
-| `HEALTHCHECK_ENABLED` | flag | on when the key is set |
+| `HEALTHCHECK_URL` | secret (the URL holds the key) | none |
 
 The check schedule on Healthchecks.io must match `SYNC_SCHEDULE`. If it does not match, the check reports "down" when no run is due. For the default schedule, use these settings:
 
