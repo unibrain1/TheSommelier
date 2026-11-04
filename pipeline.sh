@@ -54,7 +54,12 @@ if [[ ${MENU_ON} -eq 1 ]]; then
   curl -sfg "${GOOGLE_CALENDAR_ICS_URL}" -o "${DATA_DIR}/menu.ics" &
   PID_CAL=$!
 else
-  # Files from an earlier run would give pairings for a menu that is gone.
+  # Files from an earlier run would give pairings for a menu that is gone. A
+  # lost setting (a typo, a dropped env_file line) would remove the menu with
+  # only an info line in the log, so a removal of published pairings warns.
+  if [[ -f "${SITE_DIR}/pairing_suggestions.json" ]]; then
+    log "WARNING: menu feature is off — removing the pairings of an earlier run"
+  fi
   rm -f "${DATA_DIR}/menu.ics" "${DATA_DIR}/menu.json" "${DATA_DIR}/pairing_suggestions.json" "${SITE_DIR}/pairing_suggestions.json"
   log "    Skipping menu calendar — menu feature is off"
 fi

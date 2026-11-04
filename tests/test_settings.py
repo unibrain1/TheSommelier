@@ -547,6 +547,9 @@ def test_menu_valid_url_is_on(clean_env, url):
         f"https://h:99999/{ICS_CANARY}",
         f"https://h:abc/{ICS_CANARY}",
         f"calendar.example.test/{ICS_CANARY}",
+        f"https://h/{ICS_CANARY}.ics ",
+        f"https://h/{ICS_CANARY}.ics\r",
+        f" https://h/{ICS_CANARY}.ics",
     ],
     ids=[
         "ftp",
@@ -561,6 +564,9 @@ def test_menu_valid_url_is_on(clean_env, url):
         "port_99999",
         "port_text",
         "no_scheme",
+        "trailing_space",
+        "trailing_cr",
+        "leading_space",
     ],
 )
 def test_menu_invalid_url_is_incomplete_not_a_crash(clean_env, url):

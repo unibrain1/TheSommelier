@@ -24,7 +24,7 @@ If you change `SYNC_SCHEDULE`, change the Healthchecks.io check and the Home Ass
 
 The sync reads your meal plan from a Google Calendar and suggests a wine from your cellar for each meal. See [Menu plan setup](menu-plan.md).
 
-It turns on when `GOOGLE_CALENDAR_ICS_URL` is set to a valid `http://` or `https://` URL. It has no flag. To turn it off, remove the setting. A `webcal://` URL does not work. Use the `https://` URL that Google gives.
+It turns on when `GOOGLE_CALENDAR_ICS_URL` is set to a valid `http://` or `https://` URL. It has no flag. To turn it off, remove the setting. A `webcal://` URL does not work. Use the `https://` URL that Google gives. A space or a line break before or after the URL makes it not valid.
 
 If the key is not set, or its value is not valid, the feature is off. The sync logs `menu: off` with the reason. If the value is not valid, the sync also logs a warning. The sync continues, and it publishes the plan as usual.
 
@@ -32,7 +32,7 @@ When the feature is off:
 
 - The sync makes no pairings. The site shows 0 pairings.
 - `today.json` has `"meal": null`.
-- The sync removes the old `pairing_suggestions.json` from the site.
+- The sync removes the old `pairing_suggestions.json` from the site. If the site had one, the sync logs a warning.
 - The morning digest has nothing to send.
 
 When the feature is on, a calendar fetch that fails stops the run with an error.

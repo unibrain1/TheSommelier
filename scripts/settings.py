@@ -253,8 +253,10 @@ def _invalid_values(name: str) -> list[str]:
     elif name == "menu":
         url = _env("GOOGLE_CALENDAR_ICS_URL")
         # curl fetches the calendar, so the urllib rules of the ping URL do not
-        # apply here.
-        if url and not _unresolved(url) and not _http_url_valid(url):
+        # apply here. curl gets the raw value, not the stripped one. A space or
+        # a CR from a CRLF .env would fail the fetch with no cause in the log.
+        raw = os.environ.get("GOOGLE_CALENDAR_ICS_URL", "")
+        if url and not _unresolved(url) and (raw != url or not _http_url_valid(url)):
             problems.append("GOOGLE_CALENDAR_ICS_URL")
     return problems
 

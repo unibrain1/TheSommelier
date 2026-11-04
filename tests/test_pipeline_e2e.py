@@ -43,18 +43,22 @@ BOTTLES = 6 * BOTTLE_COPIES
 ICS_URL = "https://calendar.example.test/private/menu.ics"
 
 # Reads -o and the URL like the real call does, logs the URL, and copies the
-# fixture. A missing fixture is an HTTP error for `curl -f`: exit 22.
+# fixture. A missing fixture is an HTTP error for `curl -f`: exit 22. Without
+# -g, real curl reads [] and {} as a glob and fails a URL with them: exit 3.
 FAKE_CURL = """#!/usr/bin/env bash
 out=""
 url=""
+globoff=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
+    -*g*) globoff=1; shift ;;
     -*) shift ;;
     *) url="$1"; shift ;;
   esac
 done
 echo "${url}" >> "${FAKE_CURL_LOG}"
+[[ ${globoff} -eq 1 || "${url}" != *[\\[\\]\\{\\}]* ]] || exit 3
 case "${url}" in
   *Table=Inventory*) name=inventory.tsv ;;
   *Table=Notes*) name=notes.tsv ;;
@@ -935,6 +939,8 @@ def test_pipeline_without_calendar_url_runs(harness):
     assert "Skipping menu enrichment" not in result.stdout
     assert "Generating pairing suggestions" not in result.stdout
     assert "Pairing: menu feature is off" in result.stdout
+    # No earlier run published pairings, so nothing is removed.
+    assert "removing the pairings of an earlier run" not in result.stdout
 
 
 def test_pipeline_menu_on_logs_state_and_no_skip_line(harness):
@@ -966,6 +972,21 @@ def test_pipeline_menu_off_removes_files_of_an_earlier_run(harness):
     for path in stale:
         assert not path.exists(), path
     assert (site / "plan.json").is_file()
+    assert (
+        "WARNING: menu feature is off — removing the pairings of an earlier run"
+        in second.stdout
+    )
+
+
+def test_pipeline_menu_url_with_brackets_is_fetched_as_is(harness):
+    # Without -g, curl reads [] as a glob and fails the fetch.
+    url = "https://calendar.example.test/private/menu[1].ics"
+
+    result = harness.run("fetch_docker.sh", extra={"GOOGLE_CALENDAR_ICS_URL": url})
+
+    assert result.returncode == 0, _output(result)
+    assert url in harness.curl_urls()
+    assert (Path(harness.env["SITE_DIR"]) / "pairing_suggestions.json").is_file()
 
 
 def test_pipeline_menu_on_failed_calendar_fetch_fails_and_pings(harness):
