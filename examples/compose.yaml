@@ -33,9 +33,9 @@
 # Change the other values here in this file.
 #
 # A feature turns on when all its settings are present and valid. To turn a
-# feature off, remove its settings. HEALTHCHECK_ENABLED and HA_ENABLED are
-# flags. A flag accepts true, false, 1, 0, yes and no. An empty flag turns
-# the feature off and logs a warning.
+# feature off, remove its settings. HA_ENABLED is a flag. It accepts true,
+# false, 1, 0, yes and no. An empty value turns the feature off and logs a
+# warning.
 #
 # Home settings (DNS, a reverse proxy, a bind mount for /data) are in the
 # commented examples at the end of each service.
@@ -95,14 +95,10 @@ x-sommelier: &sommelier
     # CT_COMMUNITY_NOTES_RSS: "${CT_COMMUNITY_NOTES_RSS}"
 
     # --- Healthchecks.io ---
-    # The ping goes to HEALTHCHECK_BASE_URL/HEALTHCHECK_PING_KEY/HEALTHCHECK_SLUG.
-    # A failed run adds /fail. On when HEALTHCHECK_PING_KEY is set.
-    # HEALTHCHECK_PING_KEY: "${HEALTHCHECK_PING_KEY}"
-    # Default: the-sommelier
-    # HEALTHCHECK_SLUG: the-sommelier
-    # Default: https://hc-ping.com
-    # HEALTHCHECK_BASE_URL: https://hc-ping.com
-    # HEALTHCHECK_ENABLED: "true"
+    # The full ping URL that Healthchecks.io shows for the check. It holds
+    # the key, so treat it as a secret. A failed run adds /fail. On when the
+    # URL is set.
+    # HEALTHCHECK_URL: "${HEALTHCHECK_URL}"
 
     # --- Home Assistant ---
     # Turns on the data for Home Assistant REST sensors. Default: off.

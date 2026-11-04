@@ -16,17 +16,16 @@ HEALTH_MAX_AGE_MINUTES defaults to 600. A value that is not a positive integer
 gives the default, and check logs a warning.
 
 A feature turns on when all its settings are present and valid. Only
-healthcheck and home_assistant have a <FEATURE>_ENABLED flag. A feature with no
-settings (home_assistant) turns on only when its flag is a true value. The
-claude feature turns on when exactly one of ANTHROPIC_API_KEY (API key mode)
-and CLAUDE_CODE_OAUTH_TOKEN (subscription mode) is set.
+home_assistant has a <FEATURE>_ENABLED flag. It has no settings, so it turns
+on only when its flag is a true value. The claude feature turns on when
+exactly one of ANTHROPIC_API_KEY (API key mode) and CLAUDE_CODE_OAUTH_TOKEN
+(subscription mode) is set.
 
 Each function reads os.environ when it is called, not at import, so tests can
 change the environment with monkeypatch.
 """
 
 import os
-import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -60,8 +59,6 @@ DEFAULT_DATA_DIR = "/data"
 DEFAULT_PLAN_CONFIG = "/config/plan.yaml"
 DEFAULT_SMTP_HOST = "smtp.gmail.com"
 DEFAULT_SMTP_PORT = 587
-DEFAULT_HC_SLUG = "the-sommelier"
-DEFAULT_HC_BASE_URL = "https://hc-ping.com"
 # The 8-hour night gap of the default schedule, plus 2 hours.
 DEFAULT_HEALTH_MAX_AGE_MINUTES = 600
 
@@ -72,7 +69,7 @@ FEATURES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "digest": (None, ("SMTP_USERNAME", "SMTP_PASSWORD", "DIGEST_RECIPIENTS")),
     "claude": (None, (CLAUDE_API_KEY, CLAUDE_OAUTH_TOKEN)),
     "community_notes": (None, ("CT_COMMUNITY_NOTES_RSS",)),
-    "healthcheck": ("HEALTHCHECK_ENABLED", ("HEALTHCHECK_PING_KEY",)),
+    "healthcheck": (None, ("HEALTHCHECK_URL",)),
     # Home Assistant pulls the two JSON files, so the app needs no credentials.
     # With no settings to check, only the flag can turn the feature on.
     "home_assistant": ("HA_ENABLED", ()),
@@ -89,17 +86,11 @@ ALL_VARS: tuple[str, ...] = (
     "SMTP_HOST",
     "SMTP_PORT",
     "SMTP_FROM",
-    "HEALTHCHECK_SLUG",
-    "HEALTHCHECK_BASE_URL",
     "HEALTH_MAX_AGE_MINUTES",
     UNUSED_ANTHROPIC_VAR,
     REMOVED_HA_VAR,
     *REMOVED_FLAGS,
 )
-
-# The key and the slug are path parts of the ping URL. "/", "?" or "#" would move
-# the key or the /fail suffix into another part of the URL.
-_URL_PART = re.compile(r"[A-Za-z0-9_-]+")
 
 _TRUE = {"true", "1", "yes"}
 _FALSE = {"false", "0", "no"}
@@ -208,28 +199,33 @@ def _smtp_port() -> int | None:
     return port if port is not None and port <= 65535 else None
 
 
-def _hc_base_url() -> str | None:
-    base = (_env("HEALTHCHECK_BASE_URL") or DEFAULT_HC_BASE_URL).rstrip("/")
+def _hc_url() -> str:
+    return _env("HEALTHCHECK_URL").rstrip("/")
+
+
+def _hc_url_valid() -> bool:
+    url = _hc_url()
     try:
-        parts = urlsplit(base)
+        parts = urlsplit(url)
         parts.port  # noqa: B018 — raises ValueError for a port out of range
     except ValueError:
-        return None
-    # A query or a fragment, even an empty one, would swallow the key and the slug.
-    if (
-        parts.scheme not in ("http", "https")
-        or not parts.hostname
-        or parts.port == 0
-        or "?" in base
-        or "#" in base
-    ):
-        return None
-    return base
-
-
-def _hc_slug() -> str | None:
-    slug = _env("HEALTHCHECK_SLUG") or DEFAULT_HC_SLUG
-    return slug if _URL_PART.fullmatch(slug) else None
+        return False
+    # A query or a fragment, even an empty one, would swallow the /fail suffix.
+    # urllib rejects a space, a control character or a non-ASCII character only
+    # at ping time, where the failure has no cause in the log. A bad paste must
+    # fail here. A real ping URL is printable ASCII. urllib also connects to the
+    # whole netloc, so userinfo or a backslash gives a host that urlsplit does
+    # not see.
+    return (
+        parts.scheme in ("http", "https")
+        and bool(parts.hostname)
+        and parts.port != 0
+        and "?" not in url
+        and "#" not in url
+        and all("!" <= c <= "~" for c in url)
+        and "@" not in parts.netloc
+        and "\\" not in url
+    )
 
 
 def _invalid_values(name: str) -> list[str]:
@@ -240,13 +236,10 @@ def _invalid_values(name: str) -> list[str]:
             problems.append("SMTP_PORT")
         problems += [v for v in ("SMTP_HOST", "SMTP_FROM") if _unresolved(_env(v))]
     elif name == "healthcheck":
-        key = _env("HEALTHCHECK_PING_KEY")
-        if key and not _unresolved(key) and not _URL_PART.fullmatch(key):
-            problems.append("HEALTHCHECK_PING_KEY")
-        if _hc_base_url() is None:
-            problems.append("HEALTHCHECK_BASE_URL")
-        if _hc_slug() is None:
-            problems.append("HEALTHCHECK_SLUG")
+        url = _env("HEALTHCHECK_URL")
+        # An op:// value is already a problem, as an unresolved setting.
+        if url and not _unresolved(url) and not _hc_url_valid():
+            problems.append("HEALTHCHECK_URL")
     return problems
 
 
@@ -305,16 +298,14 @@ def _claude_state() -> FeatureState:
     return FeatureState("claude", "on", _MODE_LABEL[mode])
 
 
-def _flag_state(name: str, flag: str, has_settings: bool) -> FeatureState | None:
-    """Apply the flag rule. None means the settings decide."""
+def _flag_state(name: str, flag: str) -> FeatureState:
+    """Apply the flag rule of a feature that has no settings."""
     flag_value = _env(flag).lower()
     if flag in os.environ and flag_value not in _TRUE | _FALSE:
         # An unknown value fails safe: the feature stays off.
         return FeatureState(name, "bad_flag", f"not valid: {flag}", [flag])
     if flag_value in _FALSE:
         return FeatureState(name, "disabled", f"disabled by {flag}")
-    if has_settings:
-        return None
     if flag_value in _TRUE:
         return FeatureState(name, "on")
     return FeatureState(name, "not_configured", f"set {flag}=true to turn on")
@@ -339,9 +330,7 @@ def feature(name: str) -> FeatureState:
         return _claude_state()
     flag, needed = FEATURES[name]
     if flag is not None:
-        state = _flag_state(name, flag, has_settings=bool(needed))
-        if state is not None:
-            return state
+        return _flag_state(name, flag)
 
     present = [v for v in needed if _present(v)]
     if not present:
@@ -370,10 +359,10 @@ def smtp() -> SmtpSettings:
 
 
 def healthcheck_url(status: str = "success") -> str | None:
-    """Return <base>/<key>/<slug> (plus /fail), or None when the feature is off."""
+    """Return HEALTHCHECK_URL (plus /fail), or None when the feature is off."""
     if not feature("healthcheck").on:
         return None
-    url = f"{_hc_base_url()}/{_env('HEALTHCHECK_PING_KEY')}/{_hc_slug()}"
+    url = _hc_url()
     return url + "/fail" if status == "fail" else url
 
 
