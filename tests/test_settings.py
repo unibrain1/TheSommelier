@@ -17,10 +17,10 @@ SETTINGS_CLI = str(REPO / "scripts" / "settings.py")
 # Every variable that settings.py reads. A developer shell can set any of them.
 SETTING_VARS = settings.ALL_VARS
 
-# feature -> (flag, {variable: value}) with every setting present
+# feature -> (flag or None, {variable: value}) with every setting present
 FEATURES = {
     "digest": (
-        "DIGEST_ENABLED",
+        None,
         {
             "SMTP_USERNAME": "SECRET-canary-smtp-user",
             "SMTP_PASSWORD": "SECRET-canary-smtp-pass",
@@ -28,7 +28,7 @@ FEATURES = {
         },
     ),
     "community_notes": (
-        "COMMUNITY_NOTES_ENABLED",
+        None,
         {"CT_COMMUNITY_NOTES_RSS": "https://example.com/SECRET-canary-rss"},
     ),
     "healthcheck": (
@@ -37,6 +37,9 @@ FEATURES = {
     ),
 }
 
+
+# Features in FEATURES that also have an on/off flag.
+FLAGGED = [name for name, (flag, _) in FEATURES.items() if flag]
 
 # Features with no settings to check. Only the flag can turn them on.
 OPT_IN = {"home_assistant": "HA_ENABLED"}
@@ -58,6 +61,16 @@ CREDENTIALS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_T
 def test_local_feature_list_matches_settings():
     """A feature added to settings.FEATURES needs a case in this file."""
     assert set(FEATURES) | set(OPT_IN) | {"claude"} == set(settings.FEATURES)
+
+
+def test_local_flags_match_settings():
+    for name, (flag, _) in FEATURES.items():
+        assert settings.FEATURES[name][0] == flag
+    assert set(settings.REMOVED_FLAGS) == {
+        "CLAUDE_ENABLED",
+        "DIGEST_ENABLED",
+        "COMMUNITY_NOTES_ENABLED",
+    }
 
 
 REQUIRED_VALUES = {
@@ -124,6 +137,9 @@ class TestFeatureRule:
         assert not state.problems
         assert state.log_line() == f"{name}: off (not configured)"
 
+
+@pytest.mark.parametrize("name", FLAGGED)
+class TestFlagRule:
     @pytest.mark.parametrize("flag_value", ["false", "False", "FALSE", "0", "no", "NO"])
     def test_off_when_flag_false(self, clean_env, name, flag_value):
         flag = FEATURES[name][0]
@@ -707,10 +723,13 @@ def test_enabled_exit_codes(name):
     assert on.returncode == 0
     off = run_cli(["enabled", name], {})
     assert off.returncode == 1
+    results = [on, off]
     flag = FEATURES[name][0]
-    disabled = run_cli(["enabled", name], {**feature_values(name), flag: "false"})
-    assert disabled.returncode == 1
-    for result in (on, off, disabled):
+    if flag:
+        disabled = run_cli(["enabled", name], {**feature_values(name), flag: "false"})
+        assert disabled.returncode == 1
+        results.append(disabled)
+    for result in results:
         assert "SECRET-canary" not in result.stdout + result.stderr
 
 
@@ -722,10 +741,10 @@ def test_enabled_exit_codes(name):
     [("false", "disabled"), ("maybe", "bad_flag"), (None, "on")],
 )
 def test_kind_names_the_state_class(clean_env, flag_value, kind):
-    set_feature(clean_env, "digest")
+    set_feature(clean_env, "healthcheck")
     if flag_value is not None:
-        clean_env.setenv("DIGEST_ENABLED", flag_value)
-    assert settings.feature("digest").kind == kind
+        clean_env.setenv("HEALTHCHECK_ENABLED", flag_value)
+    assert settings.feature("healthcheck").kind == kind
 
 
 def test_kind_not_configured_and_incomplete(clean_env):
@@ -932,30 +951,75 @@ def test_check_warns_op_reference_in_claude_key(var):
     assert "SECRET-canary" not in result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("flag_value", ["false", "true", "SECRET-canary-flag"])
-def test_removed_claude_flag_warns_once_and_has_no_effect(clean_env, flag_value):
-    clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", OAUTH)
-    clean_env.setenv("CLAUDE_ENABLED", flag_value)
-    assert settings.feature("claude").log_line() == "claude: on (subscription)"
-    values = {
-        **REQUIRED_VALUES,
-        **CLAUDE_VALUES["subscription"],
-        "CLAUDE_ENABLED": flag_value,
-    }
-    result = run_cli(["check"], values)
+REMOVED_FLAGS = settings.REMOVED_FLAGS
+
+
+def _removed_flag_values(var):
+    name = REMOVED_FLAGS[var]
+    values = CLAUDE_VALUES["subscription"] if name == "claude" else feature_values(name)
+    return name, values
+
+
+@pytest.mark.parametrize("var", REMOVED_FLAGS)
+@pytest.mark.parametrize("flag_value", ["false", "true", "", "SECRET-canary-flag"])
+def test_removed_flag_warns_once_and_has_no_effect(clean_env, var, flag_value):
+    name, values = _removed_flag_values(var)
+    for key, value in {**values, var: flag_value}.items():
+        clean_env.setenv(key, value)
+    assert settings.feature(name).on is True
+    env = {**REQUIRED_VALUES, **values, var: flag_value}
+    result = run_cli(["check"], env)
     assert result.returncode == 0
-    lines = [ln for ln in result.stderr.splitlines() if "CLAUDE_ENABLED" in ln]
+    assert re.search(rf"^\s*{name}: on\b", result.stdout, re.MULTILINE)
+    lines = [ln for ln in result.stderr.splitlines() if var in ln]
     assert len(lines) == 1
     assert lines[0].startswith(
-        "WARNING: CLAUDE_ENABLED is set. The flag was removed. Remove it from .env."
+        f"WARNING: {var} is set. The flag was removed. Remove it from .env."
     )
     assert "SECRET-canary" not in result.stdout + result.stderr
-    assert run_cli(["enabled", "claude"], values).returncode == 0
+    assert run_cli(["enabled", name], env).returncode == 0
 
 
-def test_no_claude_flag_warning_when_not_set():
-    result = run_cli(["check"], {**REQUIRED_VALUES, **CLAUDE_VALUES["subscription"]})
-    assert "CLAUDE_ENABLED" not in result.stdout + result.stderr
+@pytest.mark.parametrize(
+    ("var", "rule"),
+    [
+        (
+            "CLAUDE_ENABLED",
+            "The claude feature is on when exactly one of ANTHROPIC_API_KEY and "
+            "CLAUDE_CODE_OAUTH_TOKEN is set.",
+        ),
+        (
+            "DIGEST_ENABLED",
+            "The digest feature is on when SMTP_USERNAME, SMTP_PASSWORD and "
+            "DIGEST_RECIPIENTS are set.",
+        ),
+        (
+            "COMMUNITY_NOTES_ENABLED",
+            "The community_notes feature is on when CT_COMMUNITY_NOTES_RSS is set.",
+        ),
+    ],
+)
+def test_removed_flag_warning_names_the_settings(clean_env, var, rule):
+    clean_env.setenv(var, "false")
+    _, warnings, _ = settings.check_lines()
+    assert (
+        f"WARNING: {var} is set. The flag was removed. Remove it from .env. {rule}"
+        in warnings
+    )
+
+
+@pytest.mark.parametrize("var", REMOVED_FLAGS)
+def test_removed_flag_does_not_turn_a_feature_on(clean_env, var):
+    name = REMOVED_FLAGS[var]
+    clean_env.setenv(var, "true")
+    assert settings.feature(name).on is False
+
+
+@pytest.mark.parametrize("var", REMOVED_FLAGS)
+def test_no_removed_flag_warning_when_not_set(var):
+    _, values = _removed_flag_values(var)
+    result = run_cli(["check"], {**REQUIRED_VALUES, **values})
+    assert var not in result.stdout + result.stderr
 
 
 ALL_CREDENTIALS = {

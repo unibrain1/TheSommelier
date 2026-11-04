@@ -24,7 +24,7 @@ If you change `SYNC_SCHEDULE`, change the Healthchecks.io check and the Home Ass
 
 The digest is a morning email that names the wine to open with today's meal. The email goes out at `DIGEST_SEND_SCHEDULE`, and only when the menu has an entry for today.
 
-It turns on when `SMTP_USERNAME`, `SMTP_PASSWORD` and `DIGEST_RECIPIENTS` are all set. `DIGEST_ENABLED=false` stops the email.
+It turns on when `SMTP_USERNAME`, `SMTP_PASSWORD` and `DIGEST_RECIPIENTS` are all set. To stop the email, remove these settings.
 
 | Key | Kind | Default |
 | --- | --- | --- |
@@ -34,7 +34,6 @@ It turns on when `SMTP_USERNAME`, `SMTP_PASSWORD` and `DIGEST_RECIPIENTS` are al
 | `SMTP_HOST` | plain | `smtp.gmail.com` |
 | `SMTP_PORT` | plain | `587` |
 | `SMTP_FROM` | plain | value of `SMTP_USERNAME` |
-| `DIGEST_ENABLED` | flag | on when the settings are set |
 | `SITE_URL` | plain, optional | none |
 
 `SITE_URL` is the public URL of your site. The email may use it to show the logo.
@@ -74,12 +73,11 @@ For the API, put your Anthropic API key in `.env` as `ANTHROPIC_API_KEY`. Remove
 
 The sync reads the CellarTracker RSS feed of community notes for the wines in your cellar. The plan uses the notes for score drift, note velocity and drinking-window drift. If the feed is not available, the sync continues without it.
 
-It turns on when `CT_COMMUNITY_NOTES_RSS` is set.
+It turns on when `CT_COMMUNITY_NOTES_RSS` is set. To turn it off, remove the setting.
 
 | Key | Kind | Default |
 | --- | --- | --- |
 | `CT_COMMUNITY_NOTES_RSS` | secret (the URL holds a token) | none |
-| `COMMUNITY_NOTES_ENABLED` | flag | on when the URL is set |
 
 ## Healthchecks.io ping
 

@@ -12,7 +12,7 @@ Three variables are required: `USERNAME`, `PASSWORD` and `GOOGLE_CALENDAR_ICS_UR
 
 Each optional feature has its own section in [Optional features](features.md). Each sync logs the state of each feature.
 
-A feature turns on when all its settings are present and valid. `<FEATURE>_ENABLED` is the on/off flag. It accepts `true`, `false`, `1`, `0`, `yes` and `no`. `false`, `0` and `no` turn the feature off. An empty value or any other value also turns it off and logs a warning. Home Assistant is the exception: it has no other setting and turns on only when `HA_ENABLED` is `true`, `1` or `yes`.
+A feature turns on when all its settings are present and valid. To turn a feature off, remove its settings. Two features also have an on/off flag: `HEALTHCHECK_ENABLED` and `HA_ENABLED`. A flag accepts `true`, `false`, `1`, `0`, `yes` and `no`. `false`, `0` and `no` turn the feature off. An empty value or any other value also turns it off and logs a warning. Home Assistant has no other setting, so it turns on only when `HA_ENABLED` is `true`, `1` or `yes`.
 
 Claude has no flag. Set one of its two keys, or neither. The [choice table](features.md#claude-tasting-notes-and-menu-enrichment) shows the three choices.
 
@@ -43,12 +43,10 @@ Do not commit `.env`. Git ignores it.
 | `SMTP_HOST` | `smtp.gmail.com` | No | Digest email. SMTP server. |
 | `SMTP_PORT` | `587` | No | Digest email. SMTP port. |
 | `SMTP_FROM` | value of `SMTP_USERNAME` | No | Digest email. Sender address. |
-| `DIGEST_ENABLED` | on when its settings are set | No | `false` stops the email. |
 | `SITE_URL` | none | No | Public URL of your site. The digest email may use it to show the logo. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | For notes | Claude notes and menu enrichment with your Claude subscription. Set at most one Claude key. See [Claude login](features.md#claude-login). |
 | `ANTHROPIC_API_KEY` | none | For notes | Claude notes and menu enrichment on your API bill. Set at most one Claude key. See [Claude login](features.md#claude-login). |
 | `CT_COMMUNITY_NOTES_RSS` | none | For community notes | Community notes. RSS URL of the CellarTracker notes feed. It holds a token. |
-| `COMMUNITY_NOTES_ENABLED` | on when the URL is set | No | `false` turns off the community notes. |
 | `HEALTHCHECK_PING_KEY` | none | For the ping | Healthchecks.io. On when the key is set. |
 | `HEALTHCHECK_SLUG` | `the-sommelier` | No | Healthchecks.io. Name of the check. |
 | `HEALTHCHECK_BASE_URL` | `https://hc-ping.com` | No | Healthchecks.io. Base URL of the ping. |

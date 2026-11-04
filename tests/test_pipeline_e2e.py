@@ -389,12 +389,17 @@ def test_pipeline_community_notes_off_and_on(harness):
     assert "community notes feature is off" in off.stdout
     assert not (data / "community_notes.json").exists()
 
+    # The removed flag has no effect: the URL alone turns the fetch on.
     on = harness.run(
         "fetch_docker.sh",
-        extra={"CT_COMMUNITY_NOTES_RSS": f"{harness.server.base_url}/rss"},
+        extra={
+            "CT_COMMUNITY_NOTES_RSS": f"{harness.server.base_url}/rss",
+            "COMMUNITY_NOTES_ENABLED": "false",
+        },
     )
     assert on.returncode == 0, _output(on)
     assert "Fetching community tasting notes" in on.stdout
+    assert "COMMUNITY_NOTES_ENABLED is set. The flag was removed." in _output(on)
     cache = json.loads((data / "community_notes.json").read_text())
     assert list(cache) == ["200001"]
     assert cache["200001"][0]["score"] == 93

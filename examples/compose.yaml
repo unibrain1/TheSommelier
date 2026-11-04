@@ -32,8 +32,9 @@
 # shell there before you start the container.
 # Change the other values here in this file.
 #
-# A feature turns on when all its settings are present and valid. A
-# *_ENABLED flag accepts true, false, 1, 0, yes and no. An empty flag turns
+# A feature turns on when all its settings are present and valid. To turn a
+# feature off, remove its settings. HEALTHCHECK_ENABLED and HA_ENABLED are
+# flags. A flag accepts true, false, 1, 0, yes and no. An empty flag turns
 # the feature off and logs a warning.
 #
 # Home settings (DNS, a reverse proxy, a bind mount for /data) are in the
@@ -76,8 +77,6 @@ x-sommelier: &sommelier
     # SMTP_PORT: "587"
     # The sender address. Default: the value of SMTP_USERNAME.
     # SMTP_FROM: sender@example.com
-    # false stops the email.
-    # DIGEST_ENABLED: "true"
     # The public URL of your site. The digest email may use it to show the
     # logo. Optional.
     # SITE_URL: https://sommelier.example.com
@@ -94,7 +93,6 @@ x-sommelier: &sommelier
     # --- CellarTracker community notes ---
     # The RSS feed URL. It holds a token, so treat it as a secret.
     # CT_COMMUNITY_NOTES_RSS: "${CT_COMMUNITY_NOTES_RSS}"
-    # COMMUNITY_NOTES_ENABLED: "true"
 
     # --- Healthchecks.io ---
     # The ping goes to HEALTHCHECK_BASE_URL/HEALTHCHECK_PING_KEY/HEALTHCHECK_SLUG.

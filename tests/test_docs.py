@@ -12,7 +12,7 @@ import settings
 REPO = Path(__file__).resolve().parent.parent
 
 # settings.py names these only to warn a host that still sets them.
-REMOVED_VARS = {"HA_SSH_TARGET", "CLAUDE_ENABLED"}
+REMOVED_VARS = {"HA_SSH_TARGET", *settings.REMOVED_FLAGS}
 # Scripts read these outside settings.py, which does not own them.
 SHELL_VARS = {"SYNC_SCHEDULE", "DIGEST_SEND_SCHEDULE", "TZ"}
 UPPER_NAME = re.compile(r"""["']([A-Z][A-Z0-9_]{2,})["']""")
@@ -24,7 +24,9 @@ SAMPLES = (
     "config/plan.yaml.sample",
 )
 STALE = re.compile(
-    r"\bgit\s+pull\b|\bop\s+read\b|\bHA_SSH_TARGET\b|\bCLAUDE_ENABLED\b", re.I
+    "|".join([r"\bgit\s+pull\b", r"\bop\s+read\b"])
+    + "".join(rf"|\b{name}\b" for name in sorted(REMOVED_VARS)),
+    re.I,
 )
 # The code reads these, but a user never sets them. The docs and the samples
 # must not list them: the image fixes the folders. ANTHROPIC_AUTH_TOKEN is
