@@ -83,7 +83,7 @@ It turns on when `CT_COMMUNITY_NOTES_RSS` is set. To turn it off, remove the set
 
 Each sync pings Healthchecks.io at the end. A successful run pings `HEALTHCHECK_URL`. A failed run pings the same URL with `/fail` added.
 
-Copy the ping URL from the page of the check on Healthchecks.io. Each form of the URL works: the UUID form, the ping key and slug form, and a self-hosted server. The URL must start with `https://` or `http://`. It must have no query (`?`), no fragment (`#`), no space, and no control or non-ASCII character. If the URL is not valid, the ping is off and the log names `HEALTHCHECK_URL`.
+Copy the ping URL from the page of the check on Healthchecks.io. Each form of the URL works: the UUID form, the ping key and slug form, and a self-hosted server. The URL must start with `https://` or `http://`. It must have no query (`?`), no fragment (`#`), no user name (`@`), no backslash, no space, and no control or non-ASCII character. If the URL is not valid, the ping is off and the log names `HEALTHCHECK_URL`.
 
 It turns on when `HEALTHCHECK_URL` is set. To turn it off, remove the setting.
 

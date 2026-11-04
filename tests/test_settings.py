@@ -396,6 +396,9 @@ def test_healthcheck_trailing_slash_gives_no_double_slash(clean_env, suffix):
         f"https://h/{HC_KEY}\u200bx",
         f"https://h/{HC_KEY}\u00a0x",
         f"https://h\u00e9.test/{HC_KEY}",
+        f"https://u@hc-ping.com/{HC_KEY}",
+        f"https://u:p@hc-ping.com/{HC_KEY}",
+        f"https://hc-ping.com\\@evil.test/{HC_KEY}",
     ],
 )
 def test_healthcheck_rejected_url_turns_feature_off_without_value(clean_env, url):

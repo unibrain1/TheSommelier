@@ -213,7 +213,9 @@ def _hc_url_valid() -> bool:
     # A query or a fragment, even an empty one, would swallow the /fail suffix.
     # urllib rejects a space, a control character or a non-ASCII character only
     # at ping time, where the failure has no cause in the log. A bad paste must
-    # fail here. A real ping URL is printable ASCII.
+    # fail here. A real ping URL is printable ASCII. urllib also connects to the
+    # whole netloc, so userinfo or a backslash gives a host that urlsplit does
+    # not see.
     return (
         parts.scheme in ("http", "https")
         and bool(parts.hostname)
@@ -221,6 +223,8 @@ def _hc_url_valid() -> bool:
         and "?" not in url
         and "#" not in url
         and all("!" <= c <= "~" for c in url)
+        and "@" not in parts.netloc
+        and "\\" not in url
     )
 
 
