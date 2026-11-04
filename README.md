@@ -22,7 +22,7 @@ The Sommelier reads your [CellarTracker](https://www.cellartracker.com) cellar a
 
 ### Run with Docker
 
-You need Docker with Compose, a [CellarTracker](https://www.cellartracker.com) account, and the secret `.ics` URL of a Google Calendar with your meal plans (see [Menu plan setup](docs/menu-plan.md)). You do not need the repo.
+You need Docker with Compose, a [CellarTracker](https://www.cellartracker.com) account, and, for menu pairing (optional), the secret `.ics` URL of a Google Calendar with your meal plans (see [Menu plan setup](docs/menu-plan.md)). Without the calendar, the sync makes the plan but no pairings and no digest email. You do not need the repo.
 
 1. Make a folder. Download the sample compose file:
 
@@ -38,11 +38,12 @@ You need Docker with Compose, a [CellarTracker](https://www.cellartracker.com) a
    curl -fsSLo config/plan.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/plan.yaml.sample
    ```
 
-3. Make a `.env` file next to `compose.yaml` for the three required variables. Run `chmod 600 .env`.
+3. Make a `.env` file next to `compose.yaml` for the two required variables and the optional calendar URL. Run `chmod 600 .env`.
 
    ```bash
    USERNAME=your_cellartracker_username
    PASSWORD=your_cellartracker_password
+   # Optional: turns on menu pairing
    GOOGLE_CALENDAR_ICS_URL=https://calendar.google.com/calendar/ical/example/private-token/basic.ics
    ```
 

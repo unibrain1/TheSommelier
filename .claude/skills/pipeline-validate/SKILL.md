@@ -15,6 +15,12 @@ Quick validation of existing generated JSON files. Does NOT fetch or regenerate 
    ```bash
    python3 -c "
    import json, sys, os, time
+   sys.path.insert(0, 'scripts')
+   import settings
+
+   # With the menu feature off, the pipeline makes no menu or pairing files.
+   menu_files = ('data/menu.json', 'site/pairing_suggestions.json')
+   menu_on = settings.feature('menu').on
 
    files = {
        'data/plan.json': ['allWeeks', 'quarterInfo', 'changelog'],
@@ -26,6 +32,9 @@ Quick validation of existing generated JSON files. Does NOT fetch or regenerate 
    }
    errors = []
    for path, keys in files.items():
+       if path in menu_files and not menu_on:
+           print(f'  SKIP {path} (menu feature is off)')
+           continue
        try:
            age_hours = (time.time() - os.path.getmtime(path)) / 3600
            with open(path) as f:

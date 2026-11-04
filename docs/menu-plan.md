@@ -6,6 +6,8 @@ How to get your meal plan from Google Calendar into The Sommelier.
 
 The sync reads your meal plan from a Google Calendar through its secret `.ics` URL. You can add meals by hand, or use a recipe manager such as [Paprika](https://www.paprikaapp.com).
 
+The calendar is optional. Without `GOOGLE_CALENDAR_ICS_URL`, the menu feature is off. The sync makes the plan but no pairings, and the digest has nothing to send. See [Menu pairing](features.md#menu-pairing).
+
 ## Using Paprika (recommended)
 
 Paprika is a recipe manager that can sync meal plans to Google Calendar.

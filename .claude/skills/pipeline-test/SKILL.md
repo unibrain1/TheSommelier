@@ -26,20 +26,25 @@ Run the full pipeline end-to-end and validate all generated outputs.
    |------|---------------|
    | `data/plan.json` | `allWeeks` (array of 52), `quarterInfo`, `changelog` |
    | `data/inventory.json` | non-empty array of wine objects |
-   | `data/menu.json` | array of meal objects |
+   | `data/menu.json` | array of meal objects (only when the menu feature is on) |
    | `site/plan.json` | `allWeeks`, `quarterInfo`, `changelog` |
-   | `site/pairing_suggestions.json` | array of suggestion objects |
+   | `site/pairing_suggestions.json` | array of suggestion objects (only when the menu feature is on) |
    | `site/report.json` | object with inventory diff data |
 
    ```bash
    python3 -c "
    import json, sys
+   sys.path.insert(0, 'scripts')
+   import settings
+
+   # With the menu feature off, the pipeline makes no pairing file.
    files = {
        'data/plan.json': ['allWeeks', 'quarterInfo', 'changelog'],
        'site/plan.json': ['allWeeks', 'quarterInfo', 'changelog'],
-       'site/pairing_suggestions.json': None,
        'site/report.json': None,
    }
+   if settings.feature('menu').on:
+       files['site/pairing_suggestions.json'] = None
    errors = []
    for path, keys in files.items():
        try:

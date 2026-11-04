@@ -43,18 +43,22 @@ BOTTLES = 6 * BOTTLE_COPIES
 ICS_URL = "https://calendar.example.test/private/menu.ics"
 
 # Reads -o and the URL like the real call does, logs the URL, and copies the
-# fixture. A missing fixture is an HTTP error for `curl -f`: exit 22.
+# fixture. A missing fixture is an HTTP error for `curl -f`: exit 22. Without
+# -g, real curl reads [] and {} as a glob and fails a URL with them: exit 3.
 FAKE_CURL = """#!/usr/bin/env bash
 out=""
 url=""
+globoff=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
+    -*g*) globoff=1; shift ;;
     -*) shift ;;
     *) url="$1"; shift ;;
   esac
 done
 echo "${url}" >> "${FAKE_CURL_LOG}"
+[[ ${globoff} -eq 1 || "${url}" != *[\\[\\]\\{\\}]* ]] || exit 3
 case "${url}" in
   *Table=Inventory*) name=inventory.tsv ;;
   *Table=Notes*) name=notes.tsv ;;
@@ -289,6 +293,7 @@ def test_pipeline_runs_with_tmp_data_and_site_dirs(harness):
     assert report["summary"]["inventory_total_bottles"] == BOTTLES
     assert "Skipping note generation" in result.stdout
     assert "Skipping menu enrichment" in result.stdout
+    assert "Pairing summary:" in result.stdout
     # The app copy keeps no run output.
     assert not (harness.app / "data").exists()
     assert not (harness.app / "site").exists()
@@ -313,7 +318,7 @@ def test_pipeline_site_dir_outside_data_dir(harness, tmp_path):
     assert not (site / "inventory.json").exists()
 
 
-@pytest.mark.parametrize("missing", ["USERNAME", "PASSWORD", "GOOGLE_CALENDAR_ICS_URL"])
+@pytest.mark.parametrize("missing", ["USERNAME", "PASSWORD"])
 def test_pipeline_missing_required_exits_nonzero(harness, missing):
     result = harness.run("fetch_docker.sh", drop=(missing,))
 
@@ -477,7 +482,7 @@ def test_fetch_sh_does_not_override_env_with_dotenv(harness):
         "USERNAME='fromfile'\nPASSWORD='fromfile-pw'\nGOOGLE_CALENDAR_ICS_URL='https://file.example.test/x.ics'\n"
     )
 
-    # fetch.sh skips .env only when all three required values are in the env.
+    # fetch.sh skips .env only when both required values are in the env.
     result = harness.run(
         "fetch.sh",
         extra={
@@ -495,9 +500,9 @@ def test_fetch_sh_does_not_override_env_with_dotenv(harness):
     assert not any("fromfile" in u or "file.example.test" in u for u in urls)
 
 
-@pytest.mark.parametrize("missing", ["PASSWORD", "GOOGLE_CALENDAR_ICS_URL"])
+@pytest.mark.parametrize("missing", ["USERNAME", "PASSWORD"])
 def test_fetch_sh_reads_dotenv_when_one_required_value_is_missing(harness, missing):
-    """Two of three values in the shell do not skip .env: the file is sourced."""
+    """One of two values in the shell does not skip .env: the file is sourced."""
     (harness.app / ".env").write_text(
         "USERNAME='fromfile'\nPASSWORD='fromfile-pw'\nGOOGLE_CALENDAR_ICS_URL='https://file.example.test/x.ics'\n"
     )
@@ -528,13 +533,46 @@ def test_fetch_sh_with_only_username_in_env_reads_dotenv(harness):
     result = harness.run(
         "fetch.sh",
         extra={"USERNAME": "fromenv"},
-        drop=("PASSWORD", "GOOGLE_CALENDAR_ICS_URL"),
+        drop=("PASSWORD",),
     )
 
     assert result.returncode == 0, _output(result)
     urls = harness.curl_urls()
     assert any("User=fromfile&Password=fromfile-pw" in u for u in urls)
     assert not any("fromenv" in u for u in urls)
+
+
+def test_fetch_sh_with_username_and_password_in_env_does_not_read_dotenv(harness):
+    # The calendar URL is only in .env. If fetch.sh read the file, the menu
+    # would turn on and curl would fetch the calendar.
+    (harness.app / ".env").write_text(
+        f"USERNAME='fromfile'\nPASSWORD='fromfile-pw'\n"
+        f"GOOGLE_CALENDAR_ICS_URL='{ICS_URL}'\n"
+    )
+
+    result = harness.run(
+        "fetch.sh",
+        extra={"USERNAME": "fromenv", "PASSWORD": "fromenv-pw"},
+        drop=("GOOGLE_CALENDAR_ICS_URL", "DATA_DIR", "SITE_DIR"),
+    )
+
+    assert result.returncode == 0, _output(result)
+    urls = harness.curl_urls()
+    assert any("User=fromenv&Password=fromenv-pw" in u for u in urls)
+    assert not any("fromfile" in u for u in urls)
+    assert ICS_URL not in urls
+    assert "menu: off (not configured)" in result.stdout
+    assert "Pairing: menu feature is off" in result.stdout
+    assert not (harness.app / "data" / "pairing_suggestions.json").exists()
+    assert not (harness.app / "site" / "pairing_suggestions.json").exists()
+
+
+def test_fetch_sh_with_menu_on_prints_pairing_summary(harness):
+    result = harness.run("fetch.sh")
+
+    assert result.returncode == 0, _output(result)
+    assert "Pairing summary:" in result.stdout
+    assert "Pairing: menu feature is off" not in result.stdout
 
 
 def test_send_digest_sh_dry_run_without_op(harness):
@@ -870,3 +908,149 @@ def test_leftover_ha_temp_files_are_removed_at_start(harness):
 
     assert result.returncode == 0, _output(result)
     assert not list(site.glob(".*.json.*"))
+
+
+# --- Menu calendar is optional ----------------------------------------------
+
+
+MENU_OFF = ("GOOGLE_CALENDAR_ICS_URL",)
+
+
+def test_pipeline_without_calendar_url_runs(harness):
+    data = Path(harness.env["DATA_DIR"])
+    site = Path(harness.env["SITE_DIR"])
+
+    result = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert result.returncode == 0, _output(result)
+    assert (site / "plan.json").is_file()
+    assert (site / "report.json").is_file()
+    # The four CellarTracker fetches ran. No call went to the calendar.
+    urls = harness.curl_urls()
+    assert len(urls) == 4, urls
+    assert all("cellartracker.com" in u for u in urls), urls
+    assert not any("calendar" in u or u.endswith(".ics") for u in urls), urls
+    for folder in (data, site):
+        assert not (folder / "pairing_suggestions.json").exists()
+    assert not (data / "menu.ics").exists()
+    assert not (data / "menu.json").exists()
+    assert "menu: off (not configured)" in result.stdout
+    assert "Skipping menu calendar — menu feature is off" in result.stdout
+    assert "Skipping menu enrichment" not in result.stdout
+    assert "Generating pairing suggestions" not in result.stdout
+    assert "Pairing: menu feature is off" in result.stdout
+    # No earlier run published pairings, so nothing is removed.
+    assert "removing the pairings of an earlier run" not in result.stdout
+
+
+def test_pipeline_menu_on_logs_state_and_no_skip_line(harness):
+    result = harness.run("fetch_docker.sh")
+
+    assert result.returncode == 0, _output(result)
+    assert re.search(r"^\s*menu: on$", result.stdout, re.MULTILINE)
+    assert "Skipping menu calendar" not in result.stdout
+    assert ICS_URL in harness.curl_urls()
+
+
+def test_pipeline_menu_off_removes_files_of_an_earlier_run(harness):
+    data = Path(harness.env["DATA_DIR"])
+    site = Path(harness.env["SITE_DIR"])
+    first = harness.run("fetch_docker.sh")
+    assert first.returncode == 0, _output(first)
+    stale = (
+        data / "menu.ics",
+        data / "menu.json",
+        data / "pairing_suggestions.json",
+        site / "pairing_suggestions.json",
+    )
+    for path in stale:
+        assert path.is_file(), path
+
+    second = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert second.returncode == 0, _output(second)
+    for path in stale:
+        assert not path.exists(), path
+    assert (site / "plan.json").is_file()
+    assert (
+        "WARNING: menu feature is off — removing the pairings of an earlier run"
+        in second.stdout
+    )
+
+
+def test_pipeline_menu_url_with_brackets_is_fetched_as_is(harness):
+    # Without -g, curl reads [] as a glob and fails the fetch.
+    url = "https://calendar.example.test/private/menu[1].ics"
+
+    result = harness.run("fetch_docker.sh", extra={"GOOGLE_CALENDAR_ICS_URL": url})
+
+    assert result.returncode == 0, _output(result)
+    assert url in harness.curl_urls()
+    assert (Path(harness.env["SITE_DIR"]) / "pairing_suggestions.json").is_file()
+
+
+def test_pipeline_menu_on_failed_calendar_fetch_fails_and_pings(harness):
+    (harness.fixtures / "menu.ics").unlink()
+
+    result = harness.run("fetch_docker.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode != 0, _output(result)
+    assert "Google Calendar fetch failed" in result.stdout
+    assert ICS_URL in harness.curl_urls()
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+
+
+def test_pipeline_menu_off_ignores_a_missing_calendar_fixture(harness):
+    # With the menu off, a calendar that would fail is never fetched.
+    (harness.fixtures / "menu.ics").unlink()
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra=_enable_healthcheck(harness),
+        drop=MENU_OFF,
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier"]
+
+
+def test_pipeline_menu_not_valid_url_is_off_and_not_fetched(harness):
+    result = harness.run(
+        "fetch_docker.sh", extra={"GOOGLE_CALENDAR_ICS_URL": "ftp://x/SECRET-ics"}
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "menu: off (missing or not valid: GOOGLE_CALENDAR_ICS_URL)" in result.stdout
+    assert "Skipping menu calendar" in result.stdout
+    assert not any("SECRET-ics" in u for u in harness.curl_urls())
+    assert "SECRET-ics" not in result.stdout + result.stderr
+
+
+def test_pipeline_menu_off_with_ha_makes_today_with_no_meal(harness):
+    site = Path(harness.env["SITE_DIR"])
+
+    result = harness.run("fetch_docker.sh", extra={"HA_ENABLED": "true"}, drop=MENU_OFF)
+
+    assert result.returncode == 0, _output(result)
+    today = json.loads((site / "today.json").read_text())
+    assert today == {"date": date.today().isoformat(), "meal": None}
+    week = json.loads((site / "thisweek.json").read_text())
+    assert week
+    assert "WARNING: today.py failed" not in result.stdout
+
+
+def test_pipeline_menu_off_digest_is_nothing_to_send(harness):
+    site = Path(harness.env["SITE_DIR"])
+    digest_env = {
+        "SMTP_USERNAME": "sender@example.test",
+        "SMTP_PASSWORD": "smtp-pw-canary",
+        "DIGEST_RECIPIENTS": "a@example.test",
+    }
+
+    result = harness.run("fetch_docker.sh", extra=digest_env, drop=MENU_OFF)
+
+    assert result.returncode == 0, _output(result)
+    assert "Digest: nothing to send" in result.stdout
+    assert "Digest generation failed" not in result.stdout
+    assert (site / "digest.json").is_file()
+    assert (site / "digest.html").is_file()

@@ -8,9 +8,15 @@ email) in the same folder.
 Only generates content when there's a menu entry for today — this is
 a "go pull this wine" reminder, not a daily newsletter.
 
+When the menu feature is off, the pipeline does not make
+pairing_suggestions.json. A missing file then gives a digest with no
+pairings. When the feature is on, a missing file is an error.
+
 Exit codes:
-  0 — digest generated with content worth sending
-  2 — nothing to send (no menu today)
+  0 — digest generated with content worth sending, or --force given
+  1 — error (missing plan.json, missing pairings with the menu on, or a
+      digest file that cannot be written)
+  2 — nothing to send (no menu today, or the menu feature is off)
 
 Usage: generate_digest.py [--force]
 """
@@ -46,17 +52,19 @@ def find_meals_for_date(suggestions: list[dict], target: str) -> list[dict]:
 
 def build_digest(
     plan_path: Path,
-    pairing_path: Path,
+    pairing_path: Path | None,
 ) -> dict:
-    """Build the digest data structure."""
+    """Build the digest data structure. A pairing_path of None means no pairings."""
     today = _today_local()
     today_str = today.isoformat()
 
     plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
     all_weeks = plan_data.get("allWeeks", [])
 
-    pairing_data = json.loads(pairing_path.read_text(encoding="utf-8"))
-    suggestions = pairing_data.get("suggestions", [])
+    suggestions: list[dict] = []
+    if pairing_path is not None:
+        pairing_data = json.loads(pairing_path.read_text(encoding="utf-8"))
+        suggestions = pairing_data.get("suggestions", [])
 
     current_week = find_current_week(all_weeks, today)
     today_pairings = find_meals_for_date(suggestions, today_str)
@@ -310,11 +318,15 @@ def main() -> None:
     if not plan_path.exists():
         print(f"ERROR: {plan_path} not found", file=sys.stderr)
         sys.exit(1)
+    pairings: Path | None = pairing_path
     if not pairing_path.exists():
-        print(f"ERROR: {pairing_path} not found", file=sys.stderr)
-        sys.exit(1)
+        if settings.feature("menu").on:
+            print(f"ERROR: {pairing_path} not found", file=sys.stderr)
+            sys.exit(1)
+        # Still write a fresh digest, so send_digest.py cannot send an old one.
+        pairings = None
 
-    digest = build_digest(plan_path, pairing_path)
+    digest = build_digest(plan_path, pairings)
     # logo.png is a static file of the code, not run output, so it is not in SITE_DIR.
     logo_src = _logo_src(Path(__file__).resolve().parent.parent / "site")
     digest_html = format_digest_html(digest, logo_src=logo_src)

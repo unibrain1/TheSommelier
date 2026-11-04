@@ -29,7 +29,14 @@ CT_USERNAME="${USERNAME}"
 CT_PASSWORD="${PASSWORD}"
 CT_BASE="https://www.cellartracker.com/xlquery.asp?User=${CT_USERNAME}&Password=${CT_PASSWORD}&Format=tab"
 
-log "==> Fetching inventory, notes, food tags, and menu..."
+MENU_ON=0
+MENU_FETCH_LOG="" MENU_DOWNLOAD_LOG="" MENU_PARSE_LOG=""
+if python3 scripts/settings.py enabled menu; then
+  MENU_ON=1
+  MENU_FETCH_LOG=", and menu" MENU_DOWNLOAD_LOG=" + menu calendar" MENU_PARSE_LOG=" and menu"
+fi
+
+log "==> Fetching inventory, notes, food tags${MENU_FETCH_LOG}..."
 curl -sf "${CT_BASE}&Table=Inventory&Location=1" -o "${DATA_DIR}/inventory.tsv" &
 PID_CT=$!
 
@@ -42,25 +49,41 @@ PID_FOOD=$!
 curl -sf "${CT_BASE}&Table=Consumed" -o "${DATA_DIR}/consumed.tsv" &
 PID_CONSUMED=$!
 
-curl -sf "${GOOGLE_CALENDAR_ICS_URL}" -o "${DATA_DIR}/menu.ics" &
-PID_CAL=$!
+if [[ ${MENU_ON} -eq 1 ]]; then
+  # -g: curl must not read {} or [] in the secret URL as a glob.
+  curl -sfg "${GOOGLE_CALENDAR_ICS_URL}" -o "${DATA_DIR}/menu.ics" &
+  PID_CAL=$!
+else
+  # Files from an earlier run would give pairings for a menu that is gone. A
+  # lost setting (a typo, a dropped env_file line) would remove the menu with
+  # only an info line in the log, so a removal of published pairings warns.
+  if [[ -f "${SITE_DIR}/pairing_suggestions.json" ]]; then
+    log "WARNING: menu feature is off — removing the pairings of an earlier run"
+  fi
+  rm -f "${DATA_DIR}/menu.ics" "${DATA_DIR}/menu.json" "${DATA_DIR}/pairing_suggestions.json" "${SITE_DIR}/pairing_suggestions.json"
+  log "    Skipping menu calendar — menu feature is off"
+fi
 
 wait $PID_CT || { log "ERROR: CellarTracker inventory fetch failed"; exit 1; }
 wait $PID_NOTES || { log "WARNING: CellarTracker notes fetch failed — continuing without notes"; }
 wait $PID_FOOD || { log "WARNING: CellarTracker food tags fetch failed — continuing without food tags"; }
 wait $PID_CONSUMED || { log "WARNING: CellarTracker consumed fetch failed — continuing without consumed data"; }
-wait $PID_CAL || { log "ERROR: Google Calendar fetch failed — check GOOGLE_CALENDAR_ICS_URL"; exit 1; }
+if [[ ${MENU_ON} -eq 1 ]]; then
+  wait "$PID_CAL" || { log "ERROR: Google Calendar fetch failed — check GOOGLE_CALENDAR_ICS_URL"; exit 1; }
+fi
 
 LINES=$(wc -l < "${DATA_DIR}/inventory.tsv" | tr -d ' ')
-log "    Downloaded $((LINES - 1)) bottles + notes + food tags + consumed + menu calendar"
+log "    Downloaded $((LINES - 1)) bottles + notes + food tags + consumed${MENU_DOWNLOAD_LOG}"
 
 # --- PARSE (scripted) ---
-log "==> Parsing inventory and menu..."
+log "==> Parsing inventory${MENU_PARSE_LOG}..."
 python3 scripts/parse_inventory.py "${DATA_DIR}/inventory.tsv" > "${DATA_DIR}/inventory.json" &
 PID_INV=$!
 
-python3 scripts/parse_menu.py "${DATA_DIR}/menu.ics" > "${DATA_DIR}/menu.json" &
-PID_MENU=$!
+if [[ ${MENU_ON} -eq 1 ]]; then
+  python3 scripts/parse_menu.py "${DATA_DIR}/menu.ics" > "${DATA_DIR}/menu.json" &
+  PID_MENU=$!
+fi
 
 if [[ -s "${DATA_DIR}/consumed.tsv" ]]; then
   python3 scripts/parse_consumed.py "${DATA_DIR}/consumed.tsv" > "${DATA_DIR}/consumed.json" &
@@ -68,7 +91,9 @@ if [[ -s "${DATA_DIR}/consumed.tsv" ]]; then
 fi
 
 wait $PID_INV || { log "ERROR: Inventory parse failed"; exit 1; }
-wait $PID_MENU || { log "ERROR: Menu parse failed"; exit 1; }
+if [[ ${MENU_ON} -eq 1 ]]; then
+  wait "$PID_MENU" || { log "ERROR: Menu parse failed"; exit 1; }
+fi
 if [[ -n "${PID_CONSUMED_PARSE:-}" ]]; then
   wait "$PID_CONSUMED_PARSE" || { log "WARNING: Consumed parse failed — continuing without consumed data"; }
 fi
@@ -103,24 +128,30 @@ log "==> Comparing inventory vs plan..."
 python3 scripts/compare.py "${DATA_DIR}/inventory.json" "${DATA_DIR}/plan.json" > "${DATA_DIR}/report.json" || { log "ERROR: Compare failed"; exit 1; }
 
 # --- ENRICH MENU (LLM — Claude Code CLI) ---
-if [[ ${CLAUDE_ON} -eq 0 ]]; then
-  log "    Skipping menu enrichment — Claude feature is off"
-elif ! command -v claude &> /dev/null; then
-  log "    Skipping menu enrichment — claude CLI not available"
-else
-  log "==> Enriching menu entries (Claude)..."
-  python3 scripts/enrich_menu.py "${DATA_DIR}/menu.json" "${DATA_DIR}/menu_enriched.json" "${DATA_DIR}/menu_enriched_full.json" || log "WARNING: Menu enrichment failed — pairing will use keyword matching only"
-fi
+# With the menu off there is no menu.json, so enrichment and pairing have no
+# input. The fetch step logs the skip line.
+if [[ ${MENU_ON} -eq 1 ]]; then
+  if [[ ${CLAUDE_ON} -eq 0 ]]; then
+    log "    Skipping menu enrichment — Claude feature is off"
+  elif ! command -v claude &> /dev/null; then
+    log "    Skipping menu enrichment — claude CLI not available"
+  else
+    log "==> Enriching menu entries (Claude)..."
+    python3 scripts/enrich_menu.py "${DATA_DIR}/menu.json" "${DATA_DIR}/menu_enriched.json" "${DATA_DIR}/menu_enriched_full.json" || log "WARNING: Menu enrichment failed — pairing will use keyword matching only"
+  fi
 
-log "==> Generating pairing suggestions..."
-python3 scripts/pairing.py "${DATA_DIR}/menu.json" "${DATA_DIR}/plan.json" "${DATA_DIR}/inventory.json" "${DATA_DIR}/menu_enriched_full.json" > "${DATA_DIR}/pairing_suggestions.json" || { log "ERROR: Pairing failed"; exit 1; }
+  log "==> Generating pairing suggestions..."
+  python3 scripts/pairing.py "${DATA_DIR}/menu.json" "${DATA_DIR}/plan.json" "${DATA_DIR}/inventory.json" "${DATA_DIR}/menu_enriched_full.json" > "${DATA_DIR}/pairing_suggestions.json" || { log "ERROR: Pairing failed"; exit 1; }
+fi
 
 # --- PUBLISH atomically (site always has a complete plan with notes) ---
 log "==> Publishing to ${SITE_DIR}..."
 # container_health.py reads the mtime of the published plan.json as the time of
 # the last complete run. Do not use cp -p or touch -r: they keep the old mtime.
 cp "${DATA_DIR}/plan.json" "${SITE_DIR}/plan.json"
-cp "${DATA_DIR}/pairing_suggestions.json" "${SITE_DIR}/pairing_suggestions.json"
+if [[ ${MENU_ON} -eq 1 ]]; then
+  cp "${DATA_DIR}/pairing_suggestions.json" "${SITE_DIR}/pairing_suggestions.json"
+fi
 cp "${DATA_DIR}/report.json" "${SITE_DIR}/report.json"
 
 # --- HOME ASSISTANT JSON (Home Assistant pulls it with a REST sensor) ---

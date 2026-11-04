@@ -8,7 +8,7 @@ How The Sommelier reads its settings, and a table of every environment variable.
 
 The Sommelier reads all settings from environment variables. In Docker, `compose.yaml` passes them to the container. For a run from a checkout, `.env.sample` lists the variables.
 
-Three variables are required: `USERNAME`, `PASSWORD` and `GOOGLE_CALENDAR_ICS_URL`. If one is missing, empty, or starts with `op://`, the run stops with an error that names the variable.
+Two variables are required: `USERNAME` and `PASSWORD`. If one is missing, empty, or starts with `op://`, the run stops with an error that names the variable.
 
 Each optional feature has its own section in [Optional features](features.md). Each sync logs the state of each feature.
 
@@ -20,7 +20,7 @@ In `compose.yaml`, a secret is a line with `${NAME}`. Compose reads its value fr
 
 Choose how the values reach The Sommelier:
 
-- Plain values in `.env`: run `bash fetch.sh`. The script reads `.env` only when `USERNAME`, `PASSWORD` or `GOOGLE_CALENDAR_ICS_URL` is not in the shell. Then each value in `.env` replaces the same variable in the shell. When all three are in the shell (for example with `op run`), the script does not read `.env`.
+- Plain values in `.env`: run `bash fetch.sh`. The script reads `.env` only when `USERNAME` or `PASSWORD` is not in the shell. Then each value in `.env` replaces the same variable in the shell. When both are in the shell (for example with `op run`), the script does not read `.env`. Then a `GOOGLE_CALENDAR_ICS_URL` that is only in `.env` is not read, and the menu feature is off.
 - Docker with `compose.yaml`: compose reads `.env` or the host environment for each `${NAME}`.
 - Docker with `docker-compose.yml`: compose passes the values with `env_file: .env`, so `.env` must hold plain values.
 - 1Password references: see [Keep secrets in 1Password](suggestions.md#keep-secrets-in-1password).
@@ -33,7 +33,7 @@ Do not commit `.env`. Git ignores it.
 | --- | --- | --- | --- |
 | `USERNAME` | none | Yes | CellarTracker user name. |
 | `PASSWORD` | none | Yes | CellarTracker password. |
-| `GOOGLE_CALENDAR_ICS_URL` | none | Yes | Secret `.ics` URL of the menu calendar. |
+| `GOOGLE_CALENDAR_ICS_URL` | none | No | Menu pairing. Secret `.ics` URL (`http://` or `https://`) of the menu calendar. |
 | `TZ` | `America/Los_Angeles` in `compose.yaml` | No | Time zone of the plan weeks and the schedules. |
 | `SYNC_SCHEDULE` | `*/30 6-21 * * *;0 22 * * *` | No | Cron expressions for the sync, separated by `;`. |
 | `DIGEST_SEND_SCHEDULE` | `0 8 * * *` | No | Cron expression of the morning digest email. |

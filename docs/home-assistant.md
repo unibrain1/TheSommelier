@@ -17,7 +17,7 @@ The flag is a plain value. [Configuration](configuration.md) explains the flag r
 The site serves the files at these URLs:
 
 - `https://<site host>/thisweek.json`: the wine for the current week.
-- `https://<site host>/today.json`: the meal and the pairing for today. The `meal` field is `null` when no meal is planned.
+- `https://<site host>/today.json`: the meal and the pairing for today. The `meal` field is `null` when no meal is planned or when the menu feature is off.
 
 Add this to `configuration.yaml` in Home Assistant. Replace `<site host>` with the host name of your site. Without a reverse proxy, the site is `http://<docker host>:8080`.
 

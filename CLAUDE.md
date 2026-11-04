@@ -68,8 +68,11 @@ Implemented in `scripts/generate_plan.py`:
 
 ## Google Calendar Integration
 
+- Optional. The `menu` feature turns on when `GOOGLE_CALENDAR_ICS_URL` is set and valid (http/https URL). No `_ENABLED` flag
 - Menu data from Paprika-managed calendar via secret .ics URL
 - `GOOGLE_CALENDAR_ICS_URL` in `.env`
+- Menu off: no fetch, parse, enrichment or pairing. The run removes old `menu.ics`, `menu.json` and `pairing_suggestions.json`. `today.json` has `meal: null`. The digest sends no mail
+- Menu on: a failed fetch stops the run
 - UTC timestamps converted to Pacific time (`America/Los_Angeles`)
 - Keywords extracted using `wine_keywords.py`
 

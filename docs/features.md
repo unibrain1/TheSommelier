@@ -20,11 +20,34 @@ To change a schedule, remove the `# ` from its line in `compose.yaml` and edit t
 
 If you change `SYNC_SCHEDULE`, change the Healthchecks.io check and the Home Assistant `scan_interval` (see [Home Assistant](home-assistant.md)) to match.
 
+## Menu pairing
+
+The sync reads your meal plan from a Google Calendar and suggests a wine from your cellar for each meal. See [Menu plan setup](menu-plan.md).
+
+It turns on when `GOOGLE_CALENDAR_ICS_URL` is set to a valid `http://` or `https://` URL. It has no flag. To turn it off, remove the setting. A `webcal://` URL does not work. Use the `https://` URL that Google gives. A space or a line break before or after the URL makes it not valid.
+
+If the key is not set, or its value is not valid, the feature is off. The sync logs `menu: off` with the reason. If the value is not valid, the sync also logs a warning. The sync continues, and it publishes the plan as usual.
+
+When the feature is off:
+
+- The sync makes no pairings. The site shows 0 pairings.
+- `today.json` has `"meal": null`.
+- The sync removes the old `pairing_suggestions.json` from the site. If the site had one, the sync logs a warning.
+- The morning digest has nothing to send.
+
+When the feature is on, a calendar fetch that fails stops the run with an error.
+
+| Key | Kind | Default |
+| --- | --- | --- |
+| `GOOGLE_CALENDAR_ICS_URL` | secret (the URL holds a token) | none |
+
 ## Morning digest email
 
 The digest is a morning email that names the wine to open with today's meal. The email goes out at `DIGEST_SEND_SCHEDULE`, and only when the menu has an entry for today.
 
 It turns on when `SMTP_USERNAME`, `SMTP_PASSWORD` and `DIGEST_RECIPIENTS` are all set. To stop the email, remove these settings.
+
+The digest needs the menu feature. When the menu feature is off, the digest has nothing to send, so no digest email goes out.
 
 | Key | Kind | Default |
 | --- | --- | --- |
