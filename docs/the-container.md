@@ -4,7 +4,7 @@ What the container does, which files it keeps, and how to keep them in a host fo
 
 [Back to the README](../README.md)
 
-The container runs a sync on a schedule. A sync fetches your CellarTracker cellar and your menu, builds the plan, and updates the site. See [Scheduling](features.md#scheduling) for the times.
+The container runs a sync on a schedule. A sync fetches your CellarTracker cellar, builds the plan, and updates the site. If the menu feature is on, the sync also fetches your menu and adds wine pairings. See [Scheduling](features.md#scheduling) for the times.
 
 Your files:
 
