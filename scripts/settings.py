@@ -6,7 +6,8 @@ scripts import the functions. Shell scripts use the CLI, because the security
 rules forbid eval:
 
   settings.py check              Log the state of each feature. Exit 1 when a
-                                 required variable is missing.
+                                 required variable (USERNAME, PASSWORD) is
+                                 missing.
   settings.py enabled <feature>  Exit 0 when the feature is on, else 1.
   settings.py get <name>         Print one value (data_dir, site_dir).
 
@@ -19,7 +20,8 @@ A feature turns on when all its settings are present and valid. Only
 home_assistant has a <FEATURE>_ENABLED flag. It has no settings, so it turns
 on only when its flag is a true value. The claude feature turns on when
 exactly one of ANTHROPIC_API_KEY (API key mode) and CLAUDE_CODE_OAUTH_TOKEN
-(subscription mode) is set.
+(subscription mode) is set. The menu feature turns on when
+GOOGLE_CALENDAR_ICS_URL is set to a valid http or https URL.
 
 Each function reads os.environ when it is called, not at import, so tests can
 change the environment with monkeypatch.
@@ -33,7 +35,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-REQUIRED = ("USERNAME", "PASSWORD", "GOOGLE_CALENDAR_ICS_URL")
+REQUIRED = ("USERNAME", "PASSWORD")
 
 # The two Claude keys, one for each mode. Exactly one is allowed, so the
 # choice of bill is explicit and not left to the CLI.
@@ -70,6 +72,7 @@ FEATURES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "claude": (None, (CLAUDE_API_KEY, CLAUDE_OAUTH_TOKEN)),
     "community_notes": (None, ("CT_COMMUNITY_NOTES_RSS",)),
     "healthcheck": (None, ("HEALTHCHECK_URL",)),
+    "menu": (None, ("GOOGLE_CALENDAR_ICS_URL",)),
     # Home Assistant pulls the two JSON files, so the app needs no credentials.
     # With no settings to check, only the flag can turn the feature on.
     "home_assistant": ("HA_ENABLED", ()),
@@ -203,27 +206,34 @@ def _hc_url() -> str:
     return _env("HEALTHCHECK_URL").rstrip("/")
 
 
-def _hc_url_valid() -> bool:
-    url = _hc_url()
+def _http_url_valid(url: str) -> bool:
+    """Return True for an http or https URL with a host and a valid port."""
     try:
         parts = urlsplit(url)
         parts.port  # noqa: B018 — raises ValueError for a port out of range
     except ValueError:
         return False
-    # A query or a fragment, even an empty one, would swallow the /fail suffix.
-    # urllib rejects a space, a control character or a non-ASCII character only
-    # at ping time, where the failure has no cause in the log. A bad paste must
-    # fail here. A real ping URL is printable ASCII. urllib also connects to the
-    # whole netloc, so userinfo or a backslash gives a host that urlsplit does
-    # not see.
+    # A space, a control character or a non-ASCII character fails only when the
+    # URL is fetched, where the failure has no cause in the log. A bad paste
+    # must fail here. A real URL is printable ASCII.
     return (
         parts.scheme in ("http", "https")
         and bool(parts.hostname)
         and parts.port != 0
+        and all("!" <= c <= "~" for c in url)
+    )
+
+
+def _hc_url_valid() -> bool:
+    url = _hc_url()
+    # A query or a fragment, even an empty one, would swallow the /fail suffix.
+    # urllib connects to the whole netloc, so userinfo or a backslash gives a
+    # host that urlsplit does not see.
+    return (
+        _http_url_valid(url)
         and "?" not in url
         and "#" not in url
-        and all("!" <= c <= "~" for c in url)
-        and "@" not in parts.netloc
+        and "@" not in urlsplit(url).netloc
         and "\\" not in url
     )
 
@@ -240,6 +250,12 @@ def _invalid_values(name: str) -> list[str]:
         # An op:// value is already a problem, as an unresolved setting.
         if url and not _unresolved(url) and not _hc_url_valid():
             problems.append("HEALTHCHECK_URL")
+    elif name == "menu":
+        url = _env("GOOGLE_CALENDAR_ICS_URL")
+        # curl fetches the calendar, so the urllib rules of the ping URL do not
+        # apply here.
+        if url and not _unresolved(url) and not _http_url_valid(url):
+            problems.append("GOOGLE_CALENDAR_ICS_URL")
     return problems
 
 

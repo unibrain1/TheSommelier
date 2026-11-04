@@ -182,6 +182,16 @@ def test_every_env_variable_is_a_row_of_the_configuration_table():
     assert sorted(rows & INTERNAL_VARS) == []
 
 
+def test_the_configuration_table_marks_only_the_required_variables_as_required():
+    section = _section(_text("docs/configuration.md"), "### Environment variables")
+    rows = re.findall(r"^\| `([A-Z][A-Z0-9_]+)` \|[^|]*\| (Yes|No) \|", section, re.M)
+    required = {name for name, flag in rows if flag == "Yes"}
+    optional = {name for name, flag in rows if flag == "No"}
+
+    assert required == set(settings.REQUIRED)
+    assert "GOOGLE_CALENDAR_ICS_URL" in optional
+
+
 @pytest.mark.parametrize("sample", (".env.sample", "examples/compose.yaml"))
 def test_every_env_variable_is_in_the_sample(sample):
     text = _text(sample)

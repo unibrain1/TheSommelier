@@ -2,7 +2,12 @@
 """Find today's menu and wine pairing from pairing_suggestions.json.
 
 Input:  pairing_suggestions.json path (positional argument)
-Output: today's entry as JSON to stdout, or null if no meal today.
+Output: today's entry as JSON to stdout, or {"date": ..., "meal": null}
+        if no meal today.
+
+When the menu feature is off, the pipeline does not make the input file.
+A missing file then gives the same "no meal" output. When the feature is
+on, a missing file is an error.
 """
 
 import argparse
@@ -10,6 +15,8 @@ import json
 import sys
 from datetime import date
 from pathlib import Path
+
+import settings
 
 
 def main() -> None:
@@ -19,9 +26,14 @@ def main() -> None:
     parser.add_argument("pairing_json", help="Path to pairing_suggestions.json")
     args = parser.parse_args()
 
-    data = json.loads(Path(args.pairing_json).read_text())
-    suggestions = data.get("suggestions", [])
     today_str = date.today().isoformat()
+    pairing_path = Path(args.pairing_json)
+    # With the menu off, no pairing file is the normal state, not a failure.
+    if not pairing_path.exists() and not settings.feature("menu").on:
+        suggestions = []
+    else:
+        data = json.loads(pairing_path.read_text())
+        suggestions = data.get("suggestions", [])
 
     for entry in suggestions:
         if entry.get("date") == today_str:

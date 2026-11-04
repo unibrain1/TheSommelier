@@ -50,10 +50,10 @@ def test_text_only_mentions_still_exist():
 def test_env_sample_has_no_op_reference_as_value():
     lines = (REPO / ".env.sample").read_text(encoding="utf-8").splitlines()
     assignments = [ln for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
-    # Only the required values are set lines. The optional feature values are
-    # comments.
+    # Only the required values are set lines. The optional feature values,
+    # such as the menu calendar URL, are comments.
     names = {ln.split("=", 1)[0].strip() for ln in assignments}
-    assert names == {"USERNAME", "PASSWORD", "GOOGLE_CALENDAR_ICS_URL"}
+    assert names == {"USERNAME", "PASSWORD"}
     assert [ln for ln in assignments if "op://" in ln] == []
     # A commented example line is also not allowed to hold a reference value.
     assert [ln for ln in lines if re.match(r"#\s*[A-Z_]+=op://", ln)] == []

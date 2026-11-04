@@ -6,10 +6,10 @@ How the sync builds the plan, how it ranks wines, and how it pairs wine with foo
 
 Each sync runs these steps:
 
-1. Fetch your CellarTracker inventory, notes and food tags, and your Google Calendar menu.
+1. Fetch your CellarTracker inventory, notes and food tags, and your Google Calendar menu. The sync fetches the menu only when the menu feature is on.
 2. Build a 52-week plan from drinking windows, seasons, evolution tracks and holidays.
 3. Ask Claude for a short tasting note for each bottle, if Claude is on.
-4. Compare the plan with your inventory, and suggest a pairing for each meal.
+4. Compare the plan with your inventory. If the menu feature is on, suggest a pairing for each meal.
 5. Publish the complete plan to the site.
 
 The sync builds the plan again from scratch each time. CellarTracker is the source of all wine data. Claude writes the tasting notes. The rules do the rest, so the same cellar always gives the same plan.

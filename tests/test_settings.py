@@ -35,6 +35,10 @@ FEATURES = {
         None,
         {"HEALTHCHECK_URL": "https://hc-ping.com/SECRET-canary-hckey/the-sommelier"},
     ),
+    "menu": (
+        None,
+        {"GOOGLE_CALENDAR_ICS_URL": "https://example.com/SECRET-canary-ics"},
+    ),
 }
 
 # Features with no settings to check. Only the flag can turn them on.
@@ -79,7 +83,6 @@ def test_local_flags_match_settings():
 REQUIRED_VALUES = {
     "USERNAME": "SECRET-canary-user",
     "PASSWORD": "SECRET-canary-password",
-    "GOOGLE_CALENDAR_ICS_URL": "https://example.com/SECRET-canary-ics",
 }
 
 # Features with more than one setting can be partly set.
@@ -213,11 +216,12 @@ def test_required_all_present_exits_zero():
     assert result.returncode == 0
 
 
-def test_required_all_missing_names_all_three():
+def test_required_all_missing_names_both():
     result = run_cli(["check"], {})
     assert result.returncode == 1
     for name in REQUIRED_VALUES:
         assert name in result.stderr
+    assert "GOOGLE_CALENDAR_ICS_URL" not in result.stderr
 
 
 @pytest.mark.parametrize("empty", list(REQUIRED_VALUES))
@@ -240,7 +244,19 @@ def test_required_op_reference_is_error_without_value(name):
 
 def test_required_function_lists_missing_names(clean_env):
     clean_env.setenv("USERNAME", "x")
-    assert settings.required() == ["PASSWORD", "GOOGLE_CALENDAR_ICS_URL"]
+    assert settings.required() == ["PASSWORD"]
+
+
+def test_required_is_username_and_password_only():
+    assert settings.REQUIRED == ("USERNAME", "PASSWORD")
+    assert settings.FEATURES["menu"] == (None, ("GOOGLE_CALENDAR_ICS_URL",))
+
+
+def test_check_without_calendar_url_exits_zero_and_logs_menu_off():
+    result = run_cli(["check"], REQUIRED_VALUES)
+    assert result.returncode == 0
+    assert "menu: off (not configured)" in result.stdout
+    assert "WARNING" not in result.stderr
 
 
 # --- SMTP ---------------------------------------------------------------
@@ -487,6 +503,103 @@ def test_smtp_password_is_not_in_repr(clean_env):
 def test_healthcheck_url_none_when_not_set(clean_env):
     assert settings.feature("healthcheck").kind == "not_configured"
     assert settings.healthcheck_url() is None
+
+
+# --- Menu calendar ------------------------------------------------------
+
+ICS_CANARY = "SECRET-canary-ics"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://calendar.google.com/calendar/ical/x/{ICS_CANARY}/basic.ics",
+        f"http://cal.example.test:8080/{ICS_CANARY}.ics",
+        f"https://h.example.test:65535/{ICS_CANARY}",
+        f"https://h.example.test/{ICS_CANARY}.ics?token=abc&x=1",
+    ],
+    ids=["google", "http_port", "max_port", "query_allowed"],
+)
+def test_menu_valid_url_is_on(clean_env, url):
+    clean_env.setenv("GOOGLE_CALENDAR_ICS_URL", url)
+    state = settings.feature("menu")
+    assert state.on is True
+    assert state.log_line() == "menu: on"
+    result = run_cli(["check"], {**REQUIRED_VALUES, "GOOGLE_CALENDAR_ICS_URL": url})
+    assert result.returncode == 0
+    assert re.search(r"^\s*menu: on$", result.stdout, re.MULTILINE)
+    assert "WARNING" not in result.stderr
+    assert ICS_CANARY not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"ftp://x/{ICS_CANARY}",
+        "https://",
+        f"https://h/{ICS_CANARY} x",
+        f"https://h/{ICS_CANARY}\u00e9",
+        f"https://h\u00e9.test/{ICS_CANARY}",
+        f"https://h/{ICS_CANARY}\nx",
+        f"https://h/{ICS_CANARY}\tx",
+        f"https://h/{ICS_CANARY}\x01x",
+        f"https://h:0/{ICS_CANARY}",
+        f"https://h:99999/{ICS_CANARY}",
+        f"https://h:abc/{ICS_CANARY}",
+        f"calendar.example.test/{ICS_CANARY}",
+    ],
+    ids=[
+        "ftp",
+        "no_host",
+        "space",
+        "non_ascii_path",
+        "non_ascii_host",
+        "newline",
+        "tab",
+        "control_char",
+        "port_0",
+        "port_99999",
+        "port_text",
+        "no_scheme",
+    ],
+)
+def test_menu_invalid_url_is_incomplete_not_a_crash(clean_env, url):
+    clean_env.setenv("GOOGLE_CALENDAR_ICS_URL", url)
+    state = settings.feature("menu")
+    assert state.on is False
+    assert state.kind == "incomplete"
+    assert state.problems == ["GOOGLE_CALENDAR_ICS_URL"]
+    result = run_cli(["check"], {**REQUIRED_VALUES, "GOOGLE_CALENDAR_ICS_URL": url})
+    assert result.returncode == 0
+    assert "menu: off (missing or not valid: GOOGLE_CALENDAR_ICS_URL)" in result.stdout
+    assert (
+        "WARNING: menu is off. Missing or not valid: GOOGLE_CALENDAR_ICS_URL"
+        in result.stderr
+    )
+    assert ICS_CANARY not in result.stdout + result.stderr
+    assert (
+        run_cli(["enabled", "menu"], {"GOOGLE_CALENDAR_ICS_URL": url}).returncode == 1
+    )
+
+
+def test_menu_op_reference_gives_both_warnings_without_value():
+    url = "op://vault/item/ics-canary"
+    result = run_cli(["check"], {**REQUIRED_VALUES, "GOOGLE_CALENDAR_ICS_URL": url})
+    assert result.returncode == 0
+    assert "menu: off (missing or not valid: GOOGLE_CALENDAR_ICS_URL)" in result.stdout
+    assert "WARNING: menu is off. Missing or not valid: GOOGLE_CALENDAR_ICS_URL" in (
+        result.stderr
+    )
+    assert "op run" in result.stderr
+    assert "ics-canary" not in result.stdout + result.stderr
+
+
+def test_menu_url_with_query_is_valid_but_healthcheck_url_is_not(clean_env):
+    url = "https://h.example.test/x?token=abc"
+    clean_env.setenv("GOOGLE_CALENDAR_ICS_URL", url)
+    clean_env.setenv("HEALTHCHECK_URL", url)
+    assert settings.feature("menu").on is True
+    assert settings.feature("healthcheck").on is False
 
 
 # --- startup log --------------------------------------------------------

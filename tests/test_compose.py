@@ -142,8 +142,11 @@ def test_sample_uses_the_published_image_and_does_not_build(sample, service):
 def test_sample_stops_when_a_required_secret_is_missing(sample, service):
     env = sample["services"][service]["environment"]
 
+    assert settings.REQUIRED == ("USERNAME", "PASSWORD")
     for name in settings.REQUIRED:
         assert env[name].startswith("${" + name + ":?"), f"{service} {name}"
+    # The menu calendar is optional: compose must not stop when it is not set.
+    assert "GOOGLE_CALENDAR_ICS_URL" not in env, service
 
 
 def test_sample_follows_compose_naming_practice(sample):
@@ -174,6 +177,7 @@ def test_sample_restarts_the_site_service_only(sample):
         "ANTHROPIC_API_KEY",
         "CT_COMMUNITY_NOTES_RSS",
         "HEALTHCHECK_URL",
+        "GOOGLE_CALENDAR_ICS_URL",
     ],
 )
 def test_sample_reads_each_optional_secret_from_the_host(name):

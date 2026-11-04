@@ -24,8 +24,8 @@
 # To get a new image:
 #   docker compose pull && docker compose down && docker compose up -d
 #
-# The container needs three values: USERNAME, PASSWORD and
-# GOOGLE_CALENDAR_ICS_URL. Compose stops with a message if one is missing.
+# The container needs two values: USERNAME and PASSWORD. Compose stops with
+# a message if one is missing.
 # Every other variable is optional. To use one, remove the "# " from its line.
 # A line with ${NAME} reads the value from the host environment or from .env.
 # The host environment wins. Windows always sets USERNAME, so set it in the
@@ -51,8 +51,11 @@ x-sommelier: &sommelier
     # CellarTracker login.
     USERNAME: "${USERNAME:?Set USERNAME to your CellarTracker user name}"
     PASSWORD: "${PASSWORD:?Set PASSWORD to your CellarTracker password}"
-    # The secret .ics URL of the Google Calendar that holds your menu plan.
-    GOOGLE_CALENDAR_ICS_URL: "${GOOGLE_CALENDAR_ICS_URL:?Set GOOGLE_CALENDAR_ICS_URL to the secret .ics URL}"
+
+    # --- Menu pairing ---
+    # Wine pairings for the menu plan in a Google Calendar. On when the URL is
+    # set. The secret .ics URL holds a token, so treat it as a secret.
+    # GOOGLE_CALENDAR_ICS_URL: "${GOOGLE_CALENDAR_ICS_URL}"
 
     # --- Time zone and schedules ---
     # The plan weeks and the schedules use this zone. The menu dates and the

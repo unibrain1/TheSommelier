@@ -24,11 +24,11 @@ Check that changes don't break the expected JSON schema that `site/index.html` c
 ### Pipeline Order
 
 The pipeline must execute in this order:
-1. Fetch (CellarTracker inventory + notes + food tags, Google Calendar menu) — parallel OK
-2. Parse (inventory.tsv → .json, menu.ics → .json) — after fetch
+1. Fetch (CellarTracker inventory + notes + food tags, Google Calendar menu only when the menu feature is on) — parallel OK
+2. Parse (inventory.tsv → .json, menu.ics → .json, menu only when the menu feature is on) — after fetch
 3. Generate plan (inventory.json → plan.json) — after parse
 4. Generate notes (augment plan.json with tasting notes) — after plan
-5. Compare & pair (inventory + plan → report.json, menu + plan + inventory → pairing_suggestions.json) — after notes
+5. Compare & pair (inventory + plan → report.json, menu + plan + inventory → pairing_suggestions.json only when the menu feature is on) — after notes
 6. Publish (copy data/ artifacts → site/) — after all steps complete, atomic
 
 Verify changes don't violate ordering dependencies.
