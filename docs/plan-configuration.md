@@ -8,7 +8,7 @@ Both files are optional. Each file works alone. Put them in the `config` folder.
 
 To set your own, save `config/holidays.yaml.sample` as `config/holidays.yaml`, or `config/evolution_tracks.yaml.sample` as `config/evolution_tracks.yaml`. Then change the file for your cellar.
 
-If a field is not valid, the sync stops with an error that names the file and the field, for example `/config/evolution_tracks.yaml: evolution_tracks[0].prefered_month: unknown field`. Each file allows only its own top-level key.
+If a field is not valid, the sync stops with an error that names the file and the field, for example `/config/evolution_tracks.yaml: evolution_tracks[0].prefered_month: unknown field`. Each file allows only its own top-level key. If the sync cannot search the `config` folder, it stops with an error that names the folder. In Docker, user 1000 must be able to read and search the folder, for example after `chmod 755 config`.
 
 An old `plan.yaml` in the `config` folder is not used. The sync logs a warning that tells you to move its `holidays` to `holidays.yaml` and its `evolution_tracks` to `evolution_tracks.yaml`. Then delete `plan.yaml`.
 

@@ -4,7 +4,8 @@
 settings.config_dir() gives the folder. holidays.yaml holds the holidays key
 and evolution_tracks.yaml holds the evolution_tracks key. A missing or empty
 file gives the default for that file: the default holidays, or no evolution
-tracks. A file that is not valid raises PlanConfigError. The message starts
+tracks. A file that is not valid, or a folder that cannot be searched,
+raises PlanConfigError. The message starts
 with the file path, then the field, for example
 "/config/evolution_tracks.yaml: evolution_tracks[0].preferred_month: must be an
 integer from 1 to 12". The older plan.yaml, with both keys, is not read.
@@ -14,7 +15,7 @@ load() warns when it is in the folder.
 import calendar
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -48,10 +49,8 @@ class PlanConfigError(ValueError):
 @dataclass(frozen=True)
 class PlanConfig:
     # The shapes that the schedulers in generate_plan.py expect.
-    holidays: list[tuple[str, int, int]] = field(
-        default_factory=lambda: list(DEFAULT_HOLIDAYS)
-    )
-    evolution_tracks: list[dict] = field(default_factory=list)
+    holidays: list[tuple[str, int, int]]
+    evolution_tracks: list[dict]
 
 
 def _keys(where: str, value: object, allowed: tuple[str, ...]) -> dict:
@@ -148,11 +147,12 @@ def _parse_file(
     for name in data:
         if name != key:
             raise PlanConfigError(f"{name}: unknown field")
-    if data.get(key) is None:
+    items = data.get(key)
+    if items is None:
         return default
-    if not isinstance(data[key], list):
+    if not isinstance(items, list):
         raise PlanConfigError(f"{key}: must be a list")
-    return [check(f"{key}[{i}]", item) for i, item in enumerate(data[key])]
+    return [check(f"{key}[{i}]", item) for i, item in enumerate(items)]
 
 
 def parse_holidays(data: object) -> list[tuple[str, int, int]]:
@@ -176,13 +176,31 @@ def _read(path: Path) -> object:
         raise PlanConfigError(f"cannot read the file ({exc})") from exc
 
 
-def _load_file(
-    path: Path, parse: Callable[[object], list], missing: str
-) -> list | None:
-    """Return the checked items of one file, or None when it is missing."""
-    if not path.exists():
+def _exists(path: Path) -> bool:
+    """Tell a missing file from one that cannot be checked."""
+    # Path.exists() is False for a folder with no search permission, so the
+    # run would use the defaults and skip the file with no error.
+    try:
+        path.stat()
+    except FileNotFoundError:
+        return False
+    except (PermissionError, NotADirectoryError) as exc:
+        # The cause is a folder on the path, and the file may not be there.
+        raise PlanConfigError(
+            f"{path.parent}: cannot search the folder or a folder above it "
+            f"({exc.strerror})"
+        ) from exc
+    except OSError as exc:
+        raise PlanConfigError(f"{path}: cannot check the file ({exc})") from exc
+    return True
+
+
+def _load_file(path: Path, parse: Callable[[object], list], missing: str) -> list:
+    """Return the checked items of one file. A missing file gives the default."""
+    if not _exists(path):
         print(f"Note: no {path.name} in {path.parent}, {missing}")
-        return None
+        # parse() owns the default, as for an empty file.
+        return parse(None)
     # One place adds the path, for read errors and field errors alike.
     try:
         items = parse(_read(path))
@@ -197,7 +215,7 @@ def load(config_dir: Path) -> PlanConfig:
     old = config_dir / OLD_FILE
     # A host that still has plan.yaml would otherwise lose the holidays and
     # tracks in it with no message.
-    if old.exists():
+    if _exists(old):
         print(
             f"WARNING: {old} is not used. Move its holidays to {HOLIDAYS_FILE} "
             f"and its evolution_tracks to {TRACKS_FILE} in the same folder.",
@@ -209,7 +227,4 @@ def load(config_dir: Path) -> PlanConfig:
     tracks = _load_file(
         config_dir / TRACKS_FILE, parse_tracks, "using no evolution tracks"
     )
-    return PlanConfig(
-        holidays=list(DEFAULT_HOLIDAYS) if holidays is None else holidays,
-        evolution_tracks=[] if tracks is None else tracks,
-    )
+    return PlanConfig(holidays=holidays, evolution_tracks=tracks)

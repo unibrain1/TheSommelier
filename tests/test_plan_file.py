@@ -2,6 +2,7 @@
 
 import ast
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -515,6 +516,62 @@ def test_unreadable_path_is_a_plan_config_error(tmp_path, file):
     with pytest.raises(plan_file.PlanConfigError, match="cannot read the file") as e:
         plan_file.load(tmp_path)
     assert str(tmp_path / file) in str(e.value)
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="root can search a folder with mode 000",
+)
+def test_folder_that_cannot_be_searched_is_an_error_not_the_defaults(tmp_path):
+    folder = tmp_path / "config"
+    folder.mkdir()
+    (folder / plan_file.HOLIDAYS_FILE).write_text("holidays: []\n", encoding="utf-8")
+    folder.chmod(0)
+    try:
+        with pytest.raises(plan_file.PlanConfigError) as e:
+            plan_file.load(folder)
+    finally:
+        folder.chmod(0o755)
+    # Name the folder, not plan.yaml, which this host does not have.
+    assert str(e.value).startswith(f"{folder}: cannot search the folder")
+    assert plan_file.OLD_FILE not in str(e.value)
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="root can search a folder with mode 000",
+)
+def test_holidays_file_in_a_folder_that_cannot_be_searched_is_an_error(tmp_path):
+    # load() checks plan.yaml first, so call the per-file step on its own.
+    folder = tmp_path / "config"
+    folder.mkdir()
+    (folder / plan_file.HOLIDAYS_FILE).write_text("holidays: []\n", encoding="utf-8")
+    folder.chmod(0)
+    try:
+        with pytest.raises(plan_file.PlanConfigError, match="cannot search the folder"):
+            plan_file._load_file(
+                folder / plan_file.HOLIDAYS_FILE, plan_file.parse_holidays, "x"
+            )
+    finally:
+        folder.chmod(0o755)
+
+
+def test_config_dir_that_is_a_file_is_an_error_not_the_defaults(tmp_path):
+    config = tmp_path / "config"
+    config.write_text("x", encoding="utf-8")
+    with pytest.raises(
+        plan_file.PlanConfigError,
+        match=f"^{re.escape(str(config))}: cannot search the folder",
+    ):
+        plan_file.load(config)
+
+
+def test_symlink_loop_is_an_error_not_the_defaults(tmp_path):
+    loop = tmp_path / plan_file.HOLIDAYS_FILE
+    loop.symlink_to(loop)
+    with pytest.raises(plan_file.PlanConfigError, match="cannot check the file") as e:
+        plan_file.load(tmp_path)
+    assert str(e.value).startswith(str(loop))
 
 
 # --- generate_plan ---------------------------------------------------------
