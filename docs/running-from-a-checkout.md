@@ -24,9 +24,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt pytest
 cp .env.sample .env
-cp config/plan.yaml.sample config/plan.yaml
+cp config/holidays.yaml.sample config/holidays.yaml
+cp config/evolution_tracks.yaml.sample config/evolution_tracks.yaml
 # Edit .env with your values (see docs/configuration.md)
-# Edit config/plan.yaml with your holidays and evolution tracks
+# Edit config/holidays.yaml and config/evolution_tracks.yaml for your cellar
 ```
 
 

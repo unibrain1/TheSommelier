@@ -1,20 +1,23 @@
-"""Tests for plan_file.py — the plan.yaml loader — and its use in generate_plan."""
+"""Tests for plan_file.py (holidays.yaml and evolution_tracks.yaml) and generate_plan."""
 
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 import generate_plan
 import plan_file
 import settings
 
 REPO = Path(__file__).resolve().parent.parent
-SAMPLE = REPO / "config" / "plan.yaml.sample"
+HOLIDAYS_SAMPLE = REPO / "config" / "holidays.yaml.sample"
+TRACKS_SAMPLE = REPO / "config" / "evolution_tracks.yaml.sample"
 
-VALID = """\
+HOLIDAYS_TEXT = """\
 holidays:
   - name: Anniversary
     month: 5
@@ -22,6 +25,8 @@ holidays:
   - name: Leap Day
     month: 2
     day: 29
+"""
+TRACKS_TEXT = """\
 evolution_tracks:
   - label: Laurène
     name_fragment: laurène
@@ -35,6 +40,15 @@ TRACK = (
     "    season_months: [10, 11]\n    preferred_month: 11\n"
 )
 
+# A literal list, so the test does not compare the constant with itself.
+LITERAL_DEFAULTS = [
+    ("Thanksgiving", 11, 26),
+    ("Christmas", 12, 18),
+    ("New Year's Eve", 12, 28),
+    ("Valentine's Day", 2, 14),
+    ("4th of July", 7, 4),
+]
+
 
 # Enough bottles for 52 weeks.
 WINE = {
@@ -45,36 +59,56 @@ WINE = {
 }  # fmt: skip
 
 
-def write(tmp_path: Path, text: str) -> Path:
-    path = tmp_path / "plan.yaml"
-    path.write_text(text, encoding="utf-8")
-    return path
+def write(
+    tmp_path: Path, holidays: str | None = None, tracks: str | None = None
+) -> Path:
+    """Write the given files into tmp_path (None writes no file). Return it."""
+    if holidays is not None:
+        (tmp_path / plan_file.HOLIDAYS_FILE).write_text(holidays, encoding="utf-8")
+    if tracks is not None:
+        (tmp_path / plan_file.TRACKS_FILE).write_text(tracks, encoding="utf-8")
+    return tmp_path
+
+
+def file_of(text: str) -> str:
+    if text.startswith("evolution_tracks"):
+        return plan_file.TRACKS_FILE
+    return plan_file.HOLIDAYS_FILE
+
+
+def write_for(tmp_path: Path, text: str) -> Path:
+    """Write text to the file that its top-level key belongs to."""
+    (tmp_path / file_of(text)).write_text(text, encoding="utf-8")
+    return tmp_path
 
 
 # --- missing and valid files ----------------------------------------------
 
 
-def test_missing_file_gives_defaults_and_logs(tmp_path, capsys):
-    config = plan_file.load(tmp_path / "nope.yaml")
-    assert config.holidays == plan_file.DEFAULT_HOLIDAYS
+def test_no_files_gives_default_holidays_and_no_tracks(tmp_path, capsys):
+    config = plan_file.load(tmp_path)
+    assert config.holidays == LITERAL_DEFAULTS
     assert config.evolution_tracks == []
-    out = capsys.readouterr().out
-    assert "default holidays" in out
-    assert str(tmp_path / "nope.yaml") in out
 
 
-def test_default_holidays_are_the_five_of_the_sample():
-    assert [h[0] for h in plan_file.DEFAULT_HOLIDAYS] == [
-        "Thanksgiving",
-        "Christmas",
-        "New Year's Eve",
-        "Valentine's Day",
-        "4th of July",
-    ]
+def test_holidays_file_alone_keeps_no_tracks(tmp_path):
+    config = plan_file.load(write(tmp_path, holidays=HOLIDAYS_TEXT))
+    assert config.holidays == [("Anniversary", 5, 28), ("Leap Day", 2, 29)]
+    assert config.evolution_tracks == []
 
 
-def test_valid_file_loads_with_scheduler_shapes(tmp_path):
-    config = plan_file.load(write(tmp_path, VALID))
+def test_tracks_file_alone_keeps_default_holidays(tmp_path):
+    config = plan_file.load(write(tmp_path, tracks=TRACKS_TEXT))
+    assert config.holidays == LITERAL_DEFAULTS
+    assert len(config.evolution_tracks) == 1
+
+
+def test_default_holidays_are_the_five_public_ones():
+    assert plan_file.DEFAULT_HOLIDAYS == LITERAL_DEFAULTS
+
+
+def test_valid_files_load_with_scheduler_shapes(tmp_path):
+    config = plan_file.load(write(tmp_path, HOLIDAYS_TEXT, TRACKS_TEXT))
     assert config.holidays == [("Anniversary", 5, 28), ("Leap Day", 2, 29)]
     assert config.evolution_tracks == [
         {
@@ -86,34 +120,140 @@ def test_valid_file_loads_with_scheduler_shapes(tmp_path):
     ]
 
 
-def test_sample_file_loads_as_the_defaults():
-    config = plan_file.load(SAMPLE)
-    assert config.holidays == plan_file.DEFAULT_HOLIDAYS
-    assert config.evolution_tracks == []
-
-
-@pytest.mark.parametrize("text", ["", "# only a comment\n"])
-def test_empty_file_gives_defaults(tmp_path, text):
-    config = plan_file.load(write(tmp_path, text))
-    assert config.holidays == plan_file.DEFAULT_HOLIDAYS
-    assert config.evolution_tracks == []
-
-
-def test_tracks_only_keeps_default_holidays(tmp_path):
-    config = plan_file.load(write(tmp_path, TRACK))
-    assert config.holidays == plan_file.DEFAULT_HOLIDAYS
-    assert len(config.evolution_tracks) == 1
+@pytest.mark.parametrize(
+    "file,attr,text,expected",
+    [
+        (plan_file.HOLIDAYS_FILE, "holidays", "", LITERAL_DEFAULTS),
+        (plan_file.HOLIDAYS_FILE, "holidays", "# only a comment\n", LITERAL_DEFAULTS),
+        (plan_file.HOLIDAYS_FILE, "holidays", "holidays:\n", LITERAL_DEFAULTS),
+        (plan_file.TRACKS_FILE, "evolution_tracks", "", []),
+        (plan_file.TRACKS_FILE, "evolution_tracks", "# only a comment\n", []),
+        (plan_file.TRACKS_FILE, "evolution_tracks", "evolution_tracks:\n", []),
+    ],
+)
+def test_empty_file_gives_the_file_default(tmp_path, file, attr, text, expected):
+    (tmp_path / file).write_text(text, encoding="utf-8")
+    assert getattr(plan_file.load(tmp_path), attr) == expected
 
 
 def test_empty_holiday_list_gives_no_holidays(tmp_path):
-    config = plan_file.load(write(tmp_path, "holidays: []\n"))
+    config = plan_file.load(write(tmp_path, holidays="holidays: []\n"))
     assert config.holidays == []
 
 
+def test_empty_tracks_list_gives_no_tracks(tmp_path):
+    config = plan_file.load(write(tmp_path, tracks="evolution_tracks: []\n"))
+    assert config.evolution_tracks == []
+
+
 def test_defaults_are_a_copy(tmp_path):
-    config = plan_file.load(tmp_path / "nope.yaml")
+    config = plan_file.load(tmp_path)
     config.holidays.append(("Extra", 1, 1))
     assert ("Extra", 1, 1) not in plan_file.DEFAULT_HOLIDAYS
+    assert plan_file.parse_holidays(None) is not plan_file.DEFAULT_HOLIDAYS
+
+
+# --- log lines --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("has_holidays", [False, True])
+@pytest.mark.parametrize("has_tracks", [False, True])
+def test_log_line_per_file(tmp_path, capsys, has_holidays, has_tracks):
+    write(
+        tmp_path,
+        HOLIDAYS_TEXT if has_holidays else None,
+        TRACKS_TEXT if has_tracks else None,
+    )
+    plan_file.load(tmp_path)
+    out = capsys.readouterr().out
+    h, t = tmp_path / "holidays.yaml", tmp_path / "evolution_tracks.yaml"
+    if has_holidays:
+        assert f"Loaded {h}" in out
+        assert "default holidays" not in out
+    else:
+        assert (
+            f"Note: no holidays.yaml in {tmp_path}, using the default holidays" in out
+        )
+        assert f"Loaded {h}" not in out
+    if has_tracks:
+        assert f"Loaded {t}" in out
+        assert "using no evolution tracks" not in out
+    else:
+        assert (
+            f"Note: no evolution_tracks.yaml in {tmp_path}, using no evolution tracks"
+            in out
+        )
+        assert f"Loaded {t}" not in out
+
+
+# --- the old plan.yaml ------------------------------------------------------
+
+
+def test_old_plan_yaml_warns_and_is_ignored(tmp_path, capsys):
+    old = tmp_path / "plan.yaml"
+    old.write_text(HOLIDAY.replace("name: X", "name: OldFileDay"), encoding="utf-8")
+    config = plan_file.load(tmp_path)
+    captured = capsys.readouterr()
+    for word in ("plan.yaml", "holidays.yaml", "evolution_tracks.yaml"):
+        assert word in captured.err
+    assert "WARNING" in captured.err
+    assert "OldFileDay" not in [h[0] for h in config.holidays]
+    assert config.holidays == LITERAL_DEFAULTS
+
+
+def test_no_old_file_gives_no_warning(tmp_path, capsys):
+    plan_file.load(tmp_path)
+    assert capsys.readouterr().err == ""
+
+
+def test_old_plan_yaml_is_not_read_even_when_invalid(tmp_path):
+    (tmp_path / "plan.yaml").write_text("not: [valid\n", encoding="utf-8")
+    assert plan_file.load(tmp_path).holidays == LITERAL_DEFAULTS
+
+
+# --- the samples (no personal data) ----------------------------------------
+
+
+def test_holidays_sample_loads_as_default_holidays(tmp_path):
+    config = plan_file.load(write(tmp_path, HOLIDAYS_SAMPLE.read_text("utf-8")))
+    assert config.holidays == LITERAL_DEFAULTS
+    assert config.evolution_tracks == []
+
+
+def test_tracks_sample_loads_as_no_tracks(tmp_path):
+    config = plan_file.load(write(tmp_path, tracks=TRACKS_SAMPLE.read_text("utf-8")))
+    assert config.evolution_tracks == []
+    assert config.holidays == LITERAL_DEFAULTS
+
+
+def _uncomment(text: str, marker: str) -> str:
+    """Return the commented block that starts at marker, with "# " removed."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if marker in line)
+    block = []
+    for line in lines[start:]:
+        if not line.lstrip().startswith("#"):
+            break
+        block.append(re.sub(r"^(\s*)# ?", r"\1", line))
+    return "\n".join(block) + "\n"
+
+
+def test_sample_examples_are_generic_and_valid():
+    holidays = plan_file.parse_holidays(
+        yaml.safe_load(
+            "holidays:\n"
+            + _uncomment(HOLIDAYS_SAMPLE.read_text("utf-8"), "- name: Birthday")
+        )
+    )
+    assert [h[0] for h in holidays] == ["Birthday"]
+
+    tracks_text = TRACKS_SAMPLE.read_text("utf-8")
+    block = _uncomment(tracks_text, "# evolution_tracks:")
+    tracks = plan_file.parse_tracks(yaml.safe_load(block))
+    assert [t["label"] for t in tracks] == ["Example Pinot Noir"]
+
+    for sample in (HOLIDAYS_SAMPLE, TRACKS_SAMPLE):
+        assert "laurène" not in sample.read_text("utf-8").lower()
 
 
 # --- invalid files: each error names the field ---------------------------
@@ -262,36 +402,119 @@ INVALID = [
 @pytest.mark.parametrize(
     "text,field", [(t, f) for _, t, f in INVALID], ids=[c for c, _, _ in INVALID]
 )
-def test_invalid_file_names_the_field(tmp_path, text, field):
+def test_invalid_file_names_the_file_and_the_field(tmp_path, text, field):
+    folder = write_for(tmp_path, text)
     with pytest.raises(plan_file.PlanConfigError) as excinfo:
-        plan_file.load(write(tmp_path, text))
-    assert str(excinfo.value).startswith(field)
+        plan_file.load(folder)
+    assert str(excinfo.value).startswith(f"{folder / file_of(text)}: {field}")
+
+
+@pytest.mark.parametrize("file", [plan_file.HOLIDAYS_FILE, plan_file.TRACKS_FILE])
+@pytest.mark.parametrize("text", ["- a\n- b\n", "hello\n"])
+def test_top_level_not_a_mapping_names_the_file(tmp_path, file, text):
+    (tmp_path / file).write_text(text, encoding="utf-8")
+    with pytest.raises(plan_file.PlanConfigError) as excinfo:
+        plan_file.load(tmp_path)
+    assert str(excinfo.value).startswith(f"{tmp_path / file}: top level: must be")
+
+
+@pytest.mark.parametrize(
+    "file,text,field",
+    [
+        (plan_file.HOLIDAYS_FILE, "holidays: 1\n", "holidays: must be a list"),
+        (plan_file.HOLIDAYS_FILE, "holidays: {}\n", "holidays: must be a list"),
+        (
+            plan_file.TRACKS_FILE,
+            "evolution_tracks: text\n",
+            "evolution_tracks: must be a list",
+        ),
+    ],
+)
+def test_top_key_wrong_type_names_the_file(tmp_path, file, text, field):
+    (tmp_path / file).write_text(text, encoding="utf-8")
+    with pytest.raises(plan_file.PlanConfigError) as excinfo:
+        plan_file.load(tmp_path)
+    assert str(excinfo.value) == f"{tmp_path / file}: {field}"
+
+
+def test_holidays_key_in_tracks_file_is_unknown_field(tmp_path):
+    folder = write(tmp_path, tracks=HOLIDAY)
+    with pytest.raises(plan_file.PlanConfigError) as excinfo:
+        plan_file.load(folder)
+    assert str(excinfo.value) == (
+        f"{folder / plan_file.TRACKS_FILE}: holidays: unknown field"
+    )
+
+
+def test_tracks_key_in_holidays_file_is_unknown_field(tmp_path):
+    folder = write(tmp_path, holidays=TRACK)
+    with pytest.raises(plan_file.PlanConfigError) as excinfo:
+        plan_file.load(folder)
+    assert str(excinfo.value) == (
+        f"{folder / plan_file.HOLIDAYS_FILE}: evolution_tracks: unknown field"
+    )
+
+
+def test_both_keys_in_one_file_is_unknown_field(tmp_path):
+    folder = write(tmp_path, holidays=HOLIDAY + TRACK)
+    with pytest.raises(plan_file.PlanConfigError, match="evolution_tracks: unknown"):
+        plan_file.load(folder)
+
+
+def test_parse_functions_take_data_directly():
+    assert plan_file.parse_holidays(None) == LITERAL_DEFAULTS
+    assert plan_file.parse_tracks(None) == []
+    with pytest.raises(plan_file.PlanConfigError, match=r"^holidays\[0\]\.day:"):
+        plan_file.parse_holidays({"holidays": [{"name": "X", "month": 2, "day": 30}]})
 
 
 def test_second_item_error_names_its_index(tmp_path):
     text = HOLIDAY + "  - name: Y\n    month: 99\n    day: 1\n"
-    with pytest.raises(plan_file.PlanConfigError, match=r"^holidays\[1\]\.month:"):
-        plan_file.load(write(tmp_path, text))
+    with pytest.raises(
+        plan_file.PlanConfigError, match=r"holidays\.yaml: holidays\[1\]\.month:"
+    ):
+        plan_file.load(write(tmp_path, holidays=text))
 
 
-def test_yaml_syntax_error_names_the_line(tmp_path):
-    text = "holidays:\n  - name: X\n    month: [5\n"
-    with pytest.raises(plan_file.PlanConfigError, match=r"not valid YAML at line \d+"):
-        plan_file.load(write(tmp_path, text))
+@pytest.mark.parametrize(
+    "file,text",
+    [
+        (plan_file.HOLIDAYS_FILE, "holidays:\n  - name: X\n    month: [5\n"),
+        (plan_file.TRACKS_FILE, "evolution_tracks:\n  - label: [x\n"),
+    ],
+)
+def test_yaml_syntax_error_names_the_file_and_line(tmp_path, file, text):
+    (tmp_path / file).write_text(text, encoding="utf-8")
+    with pytest.raises(plan_file.PlanConfigError) as excinfo:
+        plan_file.load(tmp_path)
+    assert re.match(
+        rf"{re.escape(str(tmp_path / file))}: not valid YAML at line \d+",
+        str(excinfo.value),
+    )
 
 
-def test_python_tags_are_not_loaded(tmp_path):
+@pytest.mark.parametrize(
+    "file,key",
+    [
+        (plan_file.HOLIDAYS_FILE, "holidays"),
+        (plan_file.TRACKS_FILE, "evolution_tracks"),
+    ],
+)
+def test_python_tags_are_not_loaded(tmp_path, file, key):
     # safe_load rejects Python object tags, so a file cannot run code.
-    text = "holidays: !!python/object/apply:os.system ['true']\n"
+    (tmp_path / file).write_text(
+        f"{key}: !!python/object/apply:os.system ['true']\n", encoding="utf-8"
+    )
     with pytest.raises(plan_file.PlanConfigError, match="not valid YAML"):
-        plan_file.load(write(tmp_path, text))
+        plan_file.load(tmp_path)
 
 
-def test_unreadable_path_is_a_plan_config_error(tmp_path):
-    folder = tmp_path / "plan.yaml"
-    folder.mkdir()
-    with pytest.raises(plan_file.PlanConfigError, match="cannot read the file"):
-        plan_file.load(folder)
+@pytest.mark.parametrize("file", [plan_file.HOLIDAYS_FILE, plan_file.TRACKS_FILE])
+def test_unreadable_path_is_a_plan_config_error(tmp_path, file):
+    (tmp_path / file).mkdir()
+    with pytest.raises(plan_file.PlanConfigError, match="cannot read the file") as e:
+        plan_file.load(tmp_path)
+    assert str(tmp_path / file) in str(e.value)
 
 
 # --- generate_plan ---------------------------------------------------------
@@ -316,31 +539,40 @@ def run_main(monkeypatch, tmp_path):
     data, site = tmp_path / "data", tmp_path / "site"
     data.mkdir()
     site.mkdir()
+    config = tmp_path / "config"
+    config.mkdir()
     monkeypatch.setenv("DATA_DIR", str(data))
     monkeypatch.setenv("SITE_DIR", str(site))
+    monkeypatch.setenv("CONFIG_DIR", str(config))
     inventory = tmp_path / "inventory.json"
     inventory.write_text(json.dumps([WINE]), encoding="utf-8")
     out = tmp_path / "plan.json"
     monkeypatch.setattr(sys, "argv", ["generate_plan.py", str(inventory), str(out)])
 
-    def run(plan_text: str | None):
-        path = tmp_path / "plan.yaml"
-        if plan_text is not None:
-            path.write_text(plan_text, encoding="utf-8")
-        monkeypatch.setenv("PLAN_CONFIG", str(path))
+    def run(holidays: str | None = None, tracks: str | None = None):
+        write(config, holidays, tracks)
         generate_plan.main()
         return out, data, site
 
     return run
 
 
-def test_main_with_invalid_file_exits_1_and_names_the_field(run_main, capsys):
+@pytest.mark.parametrize(
+    "holidays,tracks,field,file",
+    [
+        (None, TRACK.replace("preferred_month", "prefered_month"),
+         "evolution_tracks[0].prefered_month: unknown field", "evolution_tracks.yaml"),
+        ("holidays: 1\n", None, "holidays: must be a list", "holidays.yaml"),
+    ],
+)  # fmt: skip
+def test_main_with_invalid_file_exits_1_and_names_file_and_field(
+    run_main, capsys, tmp_path, holidays, tracks, field, file
+):
     with pytest.raises(SystemExit) as excinfo:
-        run_main(TRACK.replace("preferred_month", "prefered_month"))
+        run_main(holidays, tracks)
     assert excinfo.value.code == 1
     err = capsys.readouterr().err
-    assert "evolution_tracks[0].prefered_month: unknown field" in err
-    assert "plan.yaml" in err
+    assert f"Error: {tmp_path / 'config' / file}: {field}" in err
 
 
 def test_main_with_invalid_file_writes_nothing(run_main, tmp_path):
@@ -350,11 +582,18 @@ def test_main_with_invalid_file_writes_nothing(run_main, tmp_path):
     assert not (tmp_path / "data" / "plan_previous.json").exists()
 
 
-def test_main_without_file_uses_defaults_and_logs(run_main, capsys):
-    out, _, _ = run_main(None)
+def test_main_without_files_uses_defaults_and_logs(run_main, capsys):
+    out, _, _ = run_main()
     assert "default holidays" in capsys.readouterr().out
     weeks = json.loads(out.read_text(encoding="utf-8"))["allWeeks"]
     assert len(weeks) == 52
     # The plan has one label, so only the first default holiday gets an anchor.
-    defaults = {h[0] for h in plan_file.DEFAULT_HOLIDAYS}
+    defaults = {h[0] for h in LITERAL_DEFAULTS}
     assert any(w["occasion"] in defaults for w in weeks)
+
+
+def test_custom_birthday_in_holidays_file_is_in_the_plan(run_main):
+    birthday = "holidays:\n  - name: Birthday\n    month: 1\n    day: 15\n"
+    out, _, _ = run_main(holidays=birthday)
+    weeks = json.loads(out.read_text(encoding="utf-8"))["allWeeks"]
+    assert any(w["occasion"] and "Birthday" in w["occasion"] for w in weeks)

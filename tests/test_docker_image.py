@@ -253,6 +253,8 @@ def test_image_holds_no_secret_or_personal_file(sandbox, tmp_path):
     canaries = [
         ".env",
         "config/plan.yaml",
+        "config/holidays.yaml",
+        "config/evolution_tracks.yaml",
         "scripts/plan_config.py",
         "site/plan.json",
         "site/report.json",

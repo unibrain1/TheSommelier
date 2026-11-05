@@ -2,8 +2,8 @@
 # networks, a bind mount for /data) in docker-compose.override.yml.
 # See docker-compose.override.yml.sample.
 #
-# No DATA_DIR, SITE_DIR or PLAN_CONFIG here: the defaults /data, /data/site
-# and /config/plan.yaml match the volumes below, and nginx reads the run
+# No DATA_DIR, SITE_DIR or CONFIG_DIR here: the defaults /data, /data/site
+# and /config match the volumes below, and nginx reads the run
 # output only from /data/site. The the-sommelier entrypoint stops if
 # SITE_DIR is another folder. The run-now service has no entrypoint, so it
 # does not check this.

@@ -9,7 +9,7 @@ backticks. The keys are in
 - lint: `pre-commit run --all-files`
 - plans: `plans`
 - release_notes: `docs/releases/{version}.md`
-- private_paths: `.env scripts/plan_config.py config/plan.yaml docker-compose.override.yml`
+- private_paths: `.env scripts/plan_config.py config/plan.yaml config/holidays.yaml config/evolution_tracks.yaml docker-compose.override.yml`
 - deploy: `Local deploy skill (.claude/skills/deploy, not in git)`
 - vault: `Projects/The Sommelier/The Sommelier.md`
 - milestone_checks: `scripts/check-release-notes.sh`

@@ -4,11 +4,13 @@
 #   1. Make a folder and go into it.
 #   2. Save this file as compose.yaml:
 #        curl -fsSLo compose.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/examples/compose.yaml
-#   3. Optional: set your own holidays and evolution tracks. Save the plan
-#      sample as config/plan.yaml, and change it for your cellar. Without
-#      the file, the plan uses the default holidays.
+#   3. Optional: set your own holidays and evolution tracks. Save one or
+#      both samples in the config folder, and change them for your cellar.
+#      Without holidays.yaml, the plan uses the default holidays. Without
+#      evolution_tracks.yaml, the plan uses no evolution tracks.
 #        mkdir -p config
-#        curl -fsSLo config/plan.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/plan.yaml.sample
+#        curl -fsSLo config/holidays.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/holidays.yaml.sample
+#        curl -fsSLo config/evolution_tracks.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/evolution_tracks.yaml.sample
 #   4. Give the secrets to compose. Choose one way:
 #        - A .env file next to this file with plain NAME=value lines. Compose
 #          reads it for the ${NAME} values below. Keep the file private.
@@ -115,7 +117,7 @@ x-sommelier: &sommelier
   volumes:
     # The plan, the saved notes and the site. Keep it to keep your history.
     - sommelier-data:/data
-    # Your optional plan.yaml, with holidays and evolution tracks.
+    # Your optional holidays.yaml and evolution_tracks.yaml.
     - ./config:/config:ro
   read_only: true
   tmpfs:

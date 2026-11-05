@@ -700,18 +700,25 @@ def test_data_dir_default_is_slash_data(clean_env):
     assert settings.data_dir() == Path("/data")
 
 
-def test_plan_config_default_is_config_plan_yaml(clean_env):
-    assert settings.plan_config_path() == Path("/config/plan.yaml")
+def test_config_dir_default_is_config(clean_env):
+    assert settings.config_dir() == Path("/config")
 
 
-def test_plan_config_from_env(clean_env, tmp_path):
-    clean_env.setenv("PLAN_CONFIG", str(tmp_path / "plan.yaml"))
-    assert settings.plan_config_path() == tmp_path / "plan.yaml"
+def test_config_dir_from_env(clean_env, tmp_path):
+    clean_env.setenv("CONFIG_DIR", str(tmp_path))
+    assert settings.config_dir() == tmp_path
 
 
-def test_plan_config_empty_is_default(clean_env):
-    clean_env.setenv("PLAN_CONFIG", "")
-    assert settings.plan_config_path() == Path("/config/plan.yaml")
+def test_config_dir_empty_is_default(clean_env):
+    clean_env.setenv("CONFIG_DIR", "")
+    assert settings.config_dir() == Path("/config")
+
+
+def test_plan_config_is_gone():
+    assert "PLAN_CONFIG" not in settings.ALL_VARS
+    assert "CONFIG_DIR" in settings.ALL_VARS
+    assert not hasattr(settings, "plan_config_path")
+    assert not hasattr(settings, "DEFAULT_PLAN_CONFIG")
 
 
 def test_data_dir_empty_is_default(clean_env):
@@ -831,7 +838,7 @@ def test_op_reference_in_smtp_option_turns_digest_off(clean_env, var):
     assert var in state.problems
 
 
-@pytest.mark.parametrize("var", ["DATA_DIR", "SITE_DIR", "PLAN_CONFIG"])
+@pytest.mark.parametrize("var", ["DATA_DIR", "SITE_DIR", "CONFIG_DIR"])
 def test_op_reference_in_path_is_error(var):
     result = run_cli(["check"], {**REQUIRED_VALUES, var: "op://vault/item/path"})
     assert result.returncode == 1

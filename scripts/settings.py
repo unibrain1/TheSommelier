@@ -12,7 +12,8 @@ rules forbid eval:
   settings.py get <name>         Print one value (data_dir, site_dir).
 
 A bad argument exits 2. DATA_DIR defaults to /data, SITE_DIR defaults to
-$DATA_DIR/site, and PLAN_CONFIG defaults to /config/plan.yaml.
+$DATA_DIR/site, and CONFIG_DIR (the folder of the plan files) defaults to
+/config.
 HEALTH_MAX_AGE_MINUTES defaults to 600. A value that is not a positive integer
 gives the default, and check logs a warning.
 
@@ -58,7 +59,7 @@ REMOVED_FLAGS: dict[str, str] = {
 }
 
 DEFAULT_DATA_DIR = "/data"
-DEFAULT_PLAN_CONFIG = "/config/plan.yaml"
+DEFAULT_CONFIG_DIR = "/config"
 DEFAULT_SMTP_HOST = "smtp.gmail.com"
 DEFAULT_SMTP_PORT = 587
 # The 8-hour night gap of the default schedule, plus 2 hours.
@@ -84,7 +85,7 @@ ALL_VARS: tuple[str, ...] = (
     *(v for flag, needed in FEATURES.values() for v in (flag, *needed) if v),
     "DATA_DIR",
     "SITE_DIR",
-    "PLAN_CONFIG",
+    "CONFIG_DIR",
     "SITE_URL",
     "SMTP_HOST",
     "SMTP_PORT",
@@ -100,7 +101,7 @@ _FALSE = {"false", "0", "no"}
 
 # Optional values that are not feature settings. An op:// value here would
 # become a wrong path, host or address, with no other message.
-_PATH_VARS = ("DATA_DIR", "SITE_DIR", "PLAN_CONFIG")
+_PATH_VARS = ("DATA_DIR", "SITE_DIR", "CONFIG_DIR")
 _OTHER_VARS = ("SMTP_HOST", "SMTP_FROM", "SITE_URL")
 
 # The state classes of the plan. Callers test kind, not the reason text, so a
@@ -173,8 +174,8 @@ def site_dir() -> Path:
     return Path(value) if value else data_dir() / "site"
 
 
-def plan_config_path() -> Path:
-    return Path(_env("PLAN_CONFIG") or DEFAULT_PLAN_CONFIG)
+def config_dir() -> Path:
+    return Path(_env("CONFIG_DIR") or DEFAULT_CONFIG_DIR)
 
 
 def required() -> list[str]:
