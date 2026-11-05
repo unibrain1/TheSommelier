@@ -9,7 +9,7 @@ The container runs a sync on a schedule. A sync fetches your CellarTracker cella
 Your files:
 
 - `sommelier-data` is a Docker volume. It keeps the plan, the saved notes and the site. Keep it to keep your history.
-- The `config` folder next to `compose.yaml` holds your optional `plan.yaml`.
+- The `config` folder next to `compose.yaml` holds your optional `holidays.yaml` and `evolution_tracks.yaml`.
 
 To keep the data in a host folder instead of a volume, follow the comments in `compose.yaml`. Use the same folder for both services, and let user 1000 write to it.
 

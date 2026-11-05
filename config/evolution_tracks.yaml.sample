@@ -1,0 +1,27 @@
+# Plan settings: evolution tracks.
+#
+# Save this file as config/evolution_tracks.yaml and change it for your cellar:
+#   - In Docker, use the config folder next to compose.yaml. Download this
+#     file there with:
+#       curl --create-dirs -fsSLo config/evolution_tracks.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/evolution_tracks.yaml.sample
+# Without the file, the plan uses no evolution tracks. A field that is not
+# valid stops the sync with an error that names the file and the field.
+
+# Evolution tracks: open one bottle each year from a label to see how the wine
+# develops across vintages. The generator picks the most urgent vintage in its
+# drinking window and schedules it near the 15th of preferred_month.
+#
+#   label            display name of the track
+#   name_fragment    text to find in the wine names of the inventory
+#                    (case does not matter)
+#   season_months    [start, end] months to try when the preferred week is
+#                    taken. The start must not be after the end.
+#   preferred_month  month for the bottle
+#
+# Remove the "# " from the lines below and change them for your cellar:
+#
+# evolution_tracks:
+#   - label: Example Pinot Noir
+#     name_fragment: example pinot noir
+#     season_months: [10, 11]
+#     preferred_month: 11

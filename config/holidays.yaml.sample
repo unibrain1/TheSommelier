@@ -1,0 +1,32 @@
+# Plan settings: holidays.
+#
+# Save this file as config/holidays.yaml and change it for your cellar:
+#   - In Docker, use the config folder next to compose.yaml. Download this
+#     file there with:
+#       curl --create-dirs -fsSLo config/holidays.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/holidays.yaml.sample
+# Without the file, the plan uses the five holidays below. "holidays: []"
+# gives no holidays. A field that is not valid stops the sync with an error
+# that names the file and the field.
+
+# Holiday anchors. The plan generator finds the nearest week to each date and
+# puts a special bottle in it. February 29 is valid.
+holidays:
+  - name: Thanksgiving
+    month: 11
+    day: 26
+  - name: Christmas
+    month: 12
+    day: 18
+  - name: New Year's Eve
+    month: 12
+    day: 28
+  - name: Valentine's Day
+    month: 2
+    day: 14
+  - name: 4th of July
+    month: 7
+    day: 4
+  # Add your own, for example:
+  # - name: Birthday
+  #   month: 1
+  #   day: 15

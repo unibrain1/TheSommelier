@@ -31,11 +31,12 @@ You need Docker with Compose, a [CellarTracker](https://www.cellartracker.com) a
    curl -fsSLo compose.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/examples/compose.yaml
    ```
 
-2. Optional: set your own holidays and evolution tracks. Download the plan sample, and change it for your cellar (see [Plan configuration](docs/plan-configuration.md)). Without `config/plan.yaml`, the plan uses the default holidays and no evolution tracks.
+2. Optional: set your own holidays and evolution tracks. Download one or both samples, and change them for your cellar (see [Plan configuration](docs/plan-configuration.md)). Without `config/holidays.yaml`, the plan uses the default holidays. Without `config/evolution_tracks.yaml`, the plan uses no evolution tracks.
 
    ```bash
    mkdir config
-   curl -fsSLo config/plan.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/plan.yaml.sample
+   curl -fsSLo config/holidays.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/holidays.yaml.sample
+   curl -fsSLo config/evolution_tracks.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/evolution_tracks.yaml.sample
    ```
 
 3. Make a `.env` file next to `compose.yaml` for the two required variables and the optional calendar URL. Run `chmod 600 .env`.
@@ -84,7 +85,7 @@ docker compose down && docker compose up -d
 | [Home Assistant](docs/home-assistant.md) | REST sensors for the wine of the week and today's pairing. |
 | [Menu plan setup](docs/menu-plan.md) | Get your meal plan from Google Calendar. |
 | [Menu Guide](docs/menu-guide.md) | Write menu entries for the best pairings. |
-| [Plan configuration](docs/plan-configuration.md) | Holidays and evolution tracks in `plan.yaml`. |
+| [Plan configuration](docs/plan-configuration.md) | Holidays in `holidays.yaml` and evolution tracks in `evolution_tracks.yaml`. |
 | [The container](docs/the-container.md) | The sync, your files, and the health check. |
 | [Upgrade from v3.x](docs/upgrade-from-v3.md) | Move from a v3.x checkout to the image. |
 | [How it works](docs/how-it-works.md) | The sync steps, the ranking of wines, and the pairing. |

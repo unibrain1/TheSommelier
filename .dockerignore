@@ -1,5 +1,6 @@
 # Allow list. COPY . /app must not put secrets (.env), personal data
-# (config/plan.yaml, data/, plans/) or run output (site/*.json) in the image.
+# (config/holidays.yaml, config/evolution_tracks.yaml, config/plan.yaml, data/,
+# plans/) or run output (site/*.json) in the image.
 # Exclude everything, then add back only what the container runs.
 *
 

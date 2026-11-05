@@ -121,6 +121,8 @@ def _ignored(path: str) -> bool:
     [
         ".env",
         "config/plan.yaml",
+        "config/holidays.yaml",
+        "config/evolution_tracks.yaml",
         "data/inventory.json",
         "plans/issues/issue-112.md",
         ".git/HEAD",

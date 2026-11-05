@@ -916,11 +916,10 @@ def main() -> None:
         sys.exit(1)
 
     # Before any write, so a bad plan file leaves the live plan as it is.
-    plan_config_path = settings.plan_config_path()
     try:
-        plan_config = plan_file.load(plan_config_path)
+        plan_config = plan_file.load(settings.config_dir())
     except plan_file.PlanConfigError as exc:
-        print(f"Error: {plan_config_path}: {exc}", file=sys.stderr)
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     inventory: list[dict] = json.loads(inventory_path.read_text(encoding="utf-8"))

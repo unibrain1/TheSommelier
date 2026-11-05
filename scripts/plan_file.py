@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
-"""Plan settings (holidays and evolution tracks) from a YAML file.
+"""Plan settings (holidays and evolution tracks) from two YAML files.
 
-settings.plan_config_path() gives the path. A missing file gives the default
-holidays and no evolution tracks. A file that is not valid raises
-PlanConfigError. For a bad value the message starts with the field, for
-example "evolution_tracks[0].preferred_month: must be an integer from 1 to 12".
+settings.config_dir() gives the folder. holidays.yaml holds the holidays key
+and evolution_tracks.yaml holds the evolution_tracks key. A missing or empty
+file gives the default for that file: the default holidays, or no evolution
+tracks. A file that is not valid, or a folder that cannot be searched,
+raises PlanConfigError. The message starts
+with the file path, then the field, for example
+"/config/evolution_tracks.yaml: evolution_tracks[0].preferred_month: must be an
+integer from 1 to 12". The older plan.yaml, with both keys, is not read.
+load() warns when it is in the folder.
 """
 
 import calendar
+import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -24,25 +30,27 @@ DEFAULT_HOLIDAYS: list[tuple[str, int, int]] = [
     ("4th of July", 7, 4),
 ]
 
+HOLIDAYS_FILE = "holidays.yaml"
+TRACKS_FILE = "evolution_tracks.yaml"
+# The older single file with both keys. load() only warns that it is not used.
+OLD_FILE = "plan.yaml"
+
 _HOLIDAY_KEYS = ("name", "month", "day")
 _TRACK_KEYS = ("label", "name_fragment", "season_months", "preferred_month")
-_TOP_KEYS = ("holidays", "evolution_tracks")
 
 # A leap year, so that February 29 is a valid holiday.
 _LEAP_YEAR = 2024
 
 
 class PlanConfigError(ValueError):
-    """The plan file is not valid. The message names the field."""
+    """A plan file is not valid. The message names the file and the field."""
 
 
 @dataclass(frozen=True)
 class PlanConfig:
     # The shapes that the schedulers in generate_plan.py expect.
-    holidays: list[tuple[str, int, int]] = field(
-        default_factory=lambda: list(DEFAULT_HOLIDAYS)
-    )
-    evolution_tracks: list[dict] = field(default_factory=list)
+    holidays: list[tuple[str, int, int]]
+    evolution_tracks: list[dict]
 
 
 def _keys(where: str, value: object, allowed: tuple[str, ...]) -> dict:
@@ -88,15 +96,6 @@ def _month(where: str, value: object) -> int:
     return _int_in(where, value, 1, 12, "must be an integer from 1 to 12")
 
 
-def _items(data: dict, key: str, check: Callable[[str, object], object]) -> list | None:
-    """Check each item of an optional top-level list. Return None if absent."""
-    if key not in data:
-        return None
-    if not isinstance(data[key], list):
-        raise PlanConfigError(f"{key}: must be a list")
-    return [check(f"{key}[{i}]", item) for i, item in enumerate(data[key])]
-
-
 def _holiday(where: str, value: object) -> tuple[str, int, int]:
     item = _keys(where, value, _HOLIDAY_KEYS)
     name = _text(f"{where}.name", item["name"])
@@ -135,38 +134,97 @@ def _track(where: str, value: object) -> dict:
     }
 
 
-def parse(data: object) -> PlanConfig:
-    """Check the data from yaml.safe_load and return the plan settings."""
+def _parse_file(
+    data: object, key: str, check: Callable[[str, object], object], default: list
+) -> list:
+    """Check the data of one file from yaml.safe_load: one optional list key."""
+    # An empty file, or the key with no value, gives the default. An empty
+    # list is a choice: no items.
     if data is None:
-        return PlanConfig()
-    # Both top-level keys are optional, so this check is not _keys().
+        return default
     if not isinstance(data, dict):
         raise PlanConfigError("top level: must be a mapping")
-    for key in data:
-        if key not in _TOP_KEYS:
-            raise PlanConfigError(f"{key}: unknown field")
-    holidays = _items(data, "holidays", _holiday)
-    tracks = _items(data, "evolution_tracks", _track)
-    return PlanConfig(
-        holidays=list(DEFAULT_HOLIDAYS) if holidays is None else holidays,
-        evolution_tracks=tracks or [],
-    )
+    for name in data:
+        if name != key:
+            raise PlanConfigError(f"{name}: unknown field")
+    items = data.get(key)
+    if items is None:
+        return default
+    if not isinstance(items, list):
+        raise PlanConfigError(f"{key}: must be a list")
+    return [check(f"{key}[{i}]", item) for i, item in enumerate(items)]
 
 
-def load(path: Path) -> PlanConfig:
-    """Read the plan file. Raise PlanConfigError when it is not valid."""
-    if not path.exists():
-        print(
-            f"Note: no plan file at {path}, "
-            "using the default holidays and no evolution tracks"
-        )
-        return PlanConfig()
+def parse_holidays(data: object) -> list[tuple[str, int, int]]:
+    """Check the data of holidays.yaml and return the holidays."""
+    return _parse_file(data, "holidays", _holiday, list(DEFAULT_HOLIDAYS))
+
+
+def parse_tracks(data: object) -> list[dict]:
+    """Check the data of evolution_tracks.yaml and return the tracks."""
+    return _parse_file(data, "evolution_tracks", _track, [])
+
+
+def _read(path: Path) -> object:
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         line = f" at line {mark.line + 1}" if mark is not None else ""
         raise PlanConfigError(f"not valid YAML{line}") from exc
     except (OSError, UnicodeDecodeError) as exc:
         raise PlanConfigError(f"cannot read the file ({exc})") from exc
-    return parse(data)
+
+
+def _exists(path: Path) -> bool:
+    """Tell a missing file from one that cannot be checked."""
+    # Path.exists() is False for a folder with no search permission, so the
+    # run would use the defaults and skip the file with no error.
+    try:
+        path.stat()
+    except FileNotFoundError:
+        return False
+    except (PermissionError, NotADirectoryError) as exc:
+        # The cause is a folder on the path, and the file may not be there.
+        raise PlanConfigError(
+            f"{path.parent}: cannot search the folder or a folder above it "
+            f"({exc.strerror})"
+        ) from exc
+    except OSError as exc:
+        raise PlanConfigError(f"{path}: cannot check the file ({exc})") from exc
+    return True
+
+
+def _load_file(path: Path, parse: Callable[[object], list], missing: str) -> list:
+    """Return the checked items of one file. A missing file gives the default."""
+    if not _exists(path):
+        print(f"Note: no {path.name} in {path.parent}, {missing}")
+        # parse() owns the default, as for an empty file.
+        return parse(None)
+    # One place adds the path, for read errors and field errors alike.
+    try:
+        items = parse(_read(path))
+    except PlanConfigError as exc:
+        raise PlanConfigError(f"{path}: {exc}") from exc
+    print(f"Loaded {path}")
+    return items
+
+
+def load(config_dir: Path) -> PlanConfig:
+    """Read the plan files in config_dir. Raise PlanConfigError for a bad file."""
+    old = config_dir / OLD_FILE
+    # A host that still has plan.yaml would otherwise lose the holidays and
+    # tracks in it with no message.
+    if _exists(old):
+        print(
+            f"WARNING: {old} is not used. Move its holidays to {HOLIDAYS_FILE} "
+            f"and its evolution_tracks to {TRACKS_FILE} in the same folder.",
+            file=sys.stderr,
+        )
+    holidays = _load_file(
+        config_dir / HOLIDAYS_FILE, parse_holidays, "using the default holidays"
+    )
+    tracks = _load_file(
+        config_dir / TRACKS_FILE, parse_tracks, "using no evolution tracks"
+    )
+    return PlanConfig(holidays=holidays, evolution_tracks=tracks)

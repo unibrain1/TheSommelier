@@ -41,12 +41,14 @@ def dirs(clean_env, tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def generate_plan(clean_env):
-    """Load generate_plan with the sample plan.yaml.
+def generate_plan(clean_env, tmp_path_factory):
+    """Load generate_plan with an empty config folder (the default plan).
 
-    The real config/plan.yaml is git-ignored and not in CI.
+    The real config/holidays.yaml and config/evolution_tracks.yaml are
+    git-ignored and not in CI.
     """
-    clean_env.setenv("PLAN_CONFIG", str(REPO / "config" / "plan.yaml.sample"))
+    config = tmp_path_factory.mktemp("config")
+    clean_env.setenv("CONFIG_DIR", str(config))
     spec = importlib.util.spec_from_file_location(
         "generate_plan_paths_test", SCRIPTS / "generate_plan.py"
     )

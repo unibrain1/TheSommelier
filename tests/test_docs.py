@@ -28,7 +28,8 @@ SAMPLES = (
     ".env.sample",
     "examples/compose.yaml",
     "docker-compose.override.yml.sample",
-    "config/plan.yaml.sample",
+    "config/holidays.yaml.sample",
+    "config/evolution_tracks.yaml.sample",
 )
 STALE = re.compile(
     "|".join([r"\bgit\s+pull\b", r"\bop\s+read\b"])
@@ -41,7 +42,7 @@ STALE = re.compile(
 INTERNAL_VARS = {
     "DATA_DIR",
     "SITE_DIR",
-    "PLAN_CONFIG",
+    "CONFIG_DIR",
     "ANTHROPIC_AUTH_TOKEN",
 }
 CLAUDE_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
@@ -245,7 +246,9 @@ def test_the_docker_quick_start_needs_no_checkout():
 
     base = "https://raw.githubusercontent.com/unibrain1/TheSommelier/main/"
     assert base + "examples/compose.yaml" in section
-    assert base + "config/plan.yaml.sample" in section
+    assert base + "config/holidays.yaml.sample" in section
+    assert base + "config/evolution_tracks.yaml.sample" in section
+    assert "plan.yaml.sample" not in section
     assert "docker compose up -d" in section
     for forbidden in ("git clone", "cp .env.sample", "docker compose build"):
         assert forbidden not in section
@@ -256,7 +259,9 @@ def test_the_quick_start_steps_match_the_sample():
     sample = yaml.safe_load(_text("examples/compose.yaml"))
 
     assert "curl -fsSLo compose.yaml " in section
-    assert "curl -fsSLo config/plan.yaml " in section
+    assert "curl -fsSLo config/holidays.yaml " in section
+    assert "curl -fsSLo config/evolution_tracks.yaml " in section
+    assert "config/plan.yaml" not in section
     for service in sample["services"].values():
         assert "./config:/config:ro" in service["volumes"]
     ports = sample["services"]["the-sommelier"]["ports"]
@@ -265,6 +270,46 @@ def test_the_quick_start_steps_match_the_sample():
     # The .env example holds each required variable, or compose stops.
     for name in settings.REQUIRED:
         assert re.search(rf"^\s*{name}=", section, re.M), name
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["README.md", "CLAUDE.md", "docs/plan-configuration.md", "examples/compose.yaml"],
+)
+def test_docs_describe_both_files(name):
+    text = _text(name)
+    assert "holidays.yaml" in text
+    assert "evolution_tracks.yaml" in text
+
+
+# These name the old plan.yaml on purpose: the upgrade page, the release notes
+# and the old-file warning (docs/plan-configuration.md, CLAUDE.md). The
+# private_paths line of .claude/project.md keeps it, because the owner's old
+# file stays on disk.
+OLD_FILE_ALLOWED = {
+    UPGRADE_PAGE,
+    "docs/plan-configuration.md",
+    "CLAUDE.md",
+    ".claude/project.md",
+}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        n
+        for n in _current_docs()
+        if n not in OLD_FILE_ALLOWED and not n.startswith("docs/releases/")
+    ],
+)
+def test_current_docs_do_not_name_plan_yaml(name):
+    assert not re.search(r"\bplan\.yaml\b", _text(name)), name
+
+
+def test_the_old_file_allow_list_is_needed():
+    # A name on the list that no longer names plan.yaml should leave the list.
+    for name in OLD_FILE_ALLOWED - {UPGRADE_PAGE}:
+        assert re.search(r"\bplan\.yaml\b", _text(name)), name
 
 
 def test_the_quick_start_says_how_to_update_the_image():
@@ -373,3 +418,10 @@ def test_the_sample_says_to_set_one_claude_key_or_neither(sample):
 
     for name in CLAUDE_KEYS:
         assert re.search(rf"^\s*#?\s?{name}[=:]", nearby, re.M), name
+
+
+@pytest.mark.parametrize("name", ["holidays.yaml", "evolution_tracks.yaml"])
+def test_each_sample_names_its_own_target_file(name):
+    text = _text(f"config/{name}.sample")
+    base = "https://raw.githubusercontent.com/unibrain1/TheSommelier/main/"
+    assert f"-fsSLo config/{name} {base}config/{name}.sample" in text

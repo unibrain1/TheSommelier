@@ -6,7 +6,7 @@ How to move from a v3.x checkout to the v4.0.0 image.
 
 Before v4.0.0 the container ran from a repo checkout on the host. It updated itself from git, read its secrets from 1Password with the `op` CLI, and pushed two files to Home Assistant over SSH. v4.0.0 runs from a published image.
 
-1. Make the folder for the new setup. Download `compose.yaml` as in [Run with Docker](../README.md#run-with-docker). Do not download `plan.yaml`: step 3 makes it.
+1. Make the folder for the new setup. Download `compose.yaml` as in [Run with Docker](../README.md#run-with-docker). Do not download `holidays.yaml` and `evolution_tracks.yaml`: step 3 makes the files that your `plan_config.py` needs.
 2. **Settings.** Copy the old `.env` next to `compose.yaml`. Replace each `op://` value with a plain value, or use [1Password](suggestions.md#keep-secrets-in-1password). The container does not call `op`. For each optional variable in the old `.env`, remove the `# ` from its line in `compose.yaml`. Move each plain value from `.env` into `compose.yaml`. Plain values are, for example, `DIGEST_RECIPIENTS`, `SMTP_HOST` and `SYNC_SCHEDULE`. [Configuration](configuration.md) tells which values are secrets.
 3. **Plan settings.** Before v4.0.0 the settings were in `scripts/plan_config.py`. Convert that file one time with the converter in the image. Make the `config` folder, and let user 1000 write to it:
 
@@ -15,10 +15,10 @@ Before v4.0.0 the container ran from a repo checkout on the host. It updated its
    docker run --rm --entrypoint python3 -u 1000:1000 \
      -v /path/to/old/checkout/scripts/plan_config.py:/in/plan_config.py:ro \
      -v "$PWD/config":/out ghcr.io/unibrain1/thesommelier:4.0 \
-     /app/scripts/convert_plan_config.py /in/plan_config.py /out/plan.yaml
+     /app/scripts/convert_plan_config.py /in/plan_config.py /out
    ```
 
-   The converter does not write over a file that exists. Run `chmod 755 config` after.
+   The converter writes `holidays.yaml` and `evolution_tracks.yaml` in `/out`, one file for each setting that `plan_config.py` has. It does not write over a file that exists. Run `chmod 755 config` after.
 4. **Data folder.** Stop the old container in the old checkout. Copy the files of the old `data/` folder and the `*.json` files of the old `site/` folder into the `/data` volume. This keeps the plan history, the caches and the digest state. Put the old `data/` files in a folder named `old-data`, and the old `site/*.json` files in `old-data/site`. Then copy them with a temporary container:
 
    ```bash

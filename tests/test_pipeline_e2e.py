@@ -191,9 +191,10 @@ def harness(tmp_path, server) -> Harness:
         # A v3 plan_config.py of the owner can still be in scripts/.
         ignore=shutil.ignore_patterns("__pycache__", "plan_config.py"),
     )
-    # The sample, not the personal config/plan.yaml of the owner.
+    # The samples, not the personal config files of the owner.
     (app / "config").mkdir()
-    shutil.copy2(REPO / "config" / "plan.yaml.sample", app / "config" / "plan.yaml")
+    for name in ("holidays.yaml", "evolution_tracks.yaml"):
+        shutil.copy2(REPO / "config" / f"{name}.sample", app / "config" / name)
 
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
@@ -230,7 +231,7 @@ def harness(tmp_path, server) -> Harness:
         "GOOGLE_CALENDAR_ICS_URL": ICS_URL,
         "DATA_DIR": str(tmp_path / "run" / "data"),
         "SITE_DIR": str(tmp_path / "run" / "data" / "site"),
-        "PLAN_CONFIG": str(app / "config" / "plan.yaml"),
+        "CONFIG_DIR": str(app / "config"),
     }
     return Harness(tmp_path, app, fixtures, curl_log, path, server, env)
 
@@ -450,9 +451,9 @@ def test_fetch_sh_runs_locally(harness):
     assert "inventory_total_bottles" in result.stdout
 
 
-def test_fetch_sh_reads_plan_yaml_of_the_repo(harness):
-    # A field that is not valid shows which file fetch.sh gave to the plan step.
-    (harness.app / "config" / "plan.yaml").write_text("holidays: 1\n")
+def test_fetch_sh_reads_the_config_folder_of_the_repo(harness):
+    # A field that is not valid shows which folder fetch.sh gave to the plan step.
+    (harness.app / "config" / "holidays.yaml").write_text("holidays: 1\n")
     (harness.app / ".env").write_text(
         f"USERNAME='{FAKE_USER}'\n"
         f"PASSWORD='{FAKE_PASSWORD}'\n"
@@ -467,14 +468,38 @@ def test_fetch_sh_reads_plan_yaml_of_the_repo(harness):
             "GOOGLE_CALENDAR_ICS_URL",
             "DATA_DIR",
             "SITE_DIR",
-            "PLAN_CONFIG",
+            "CONFIG_DIR",
         ),
     )
 
     assert result.returncode != 0, _output(result)
     output = _output(result)
-    assert f"{harness.app / 'config' / 'plan.yaml'}: holidays: must be a list" in output
+    assert (
+        f"{harness.app / 'config' / 'holidays.yaml'}: holidays: must be a list"
+        in output
+    )
     assert "Plan generation failed" in output
+
+
+def test_run_without_config_files_uses_default_holidays(harness, tmp_path):
+    empty = tmp_path / "empty-config"
+    empty.mkdir()
+
+    result = harness.run("fetch_docker.sh", extra={"CONFIG_DIR": str(empty)})
+
+    assert result.returncode == 0, _output(result)
+    assert "Note: no holidays.yaml" in result.stdout
+    assert "Note: no evolution_tracks.yaml" in result.stdout
+    site = Path(harness.env["SITE_DIR"])
+    weeks = json.loads((site / "plan.json").read_text())["allWeeks"]
+    defaults = {
+        "Thanksgiving",
+        "Christmas",
+        "New Year's Eve",
+        "Valentine's Day",
+        "4th of July",
+    }
+    assert any(w["occasion"] in defaults for w in weeks)
 
 
 def test_fetch_sh_does_not_override_env_with_dotenv(harness):

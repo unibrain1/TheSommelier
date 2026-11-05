@@ -73,7 +73,7 @@ def test_compose_sets_no_path_environment(compose, service):
     env = compose["services"][service]["environment"]
     assert isinstance(env, dict)
 
-    for name in ("DATA_DIR", "SITE_DIR", "PLAN_CONFIG"):
+    for name in ("DATA_DIR", "SITE_DIR", "CONFIG_DIR"):
         assert name not in env, f"{service} sets {name}"
 
 

@@ -1,4 +1,4 @@
-"""Tests for convert_plan_config.py — the one-time plan_config.py to plan.yaml step."""
+"""Tests for convert_plan_config.py — the one-time plan_config.py to plan files step."""
 
 import subprocess
 import sys
@@ -91,27 +91,32 @@ def old_module(path: Path):
     return namespace
 
 
-def test_converted_file_has_the_same_values(old_config, tmp_path):
-    target = tmp_path / "out" / "plan.yaml"
-    result = run(str(old_config), str(target))
+def test_converted_files_have_the_same_values(old_config, tmp_path):
+    out = tmp_path / "out"
+    result = run(str(old_config), str(out))
     assert result.returncode == 0, result.stderr
 
     old = old_module(old_config)
-    data = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert [(h["name"], h["month"], h["day"]) for h in data["holidays"]] == old[
+    holidays = yaml.safe_load((out / "holidays.yaml").read_text(encoding="utf-8"))
+    tracks_text = (out / "evolution_tracks.yaml").read_text(encoding="utf-8")
+    tracks = yaml.safe_load(tracks_text)
+    assert list(holidays) == ["holidays"]
+    assert list(tracks) == ["evolution_tracks"]
+    assert [(h["name"], h["month"], h["day"]) for h in holidays["holidays"]] == old[
         "HOLIDAYS"
     ]
-    assert len(data["evolution_tracks"]) == 2
-    assert all("occasion_template" not in t for t in data["evolution_tracks"])
-    assert "Laurène" in target.read_text(encoding="utf-8")
+    assert len(tracks["evolution_tracks"]) == 2
+    assert all("occasion_template" not in t for t in tracks["evolution_tracks"])
+    assert "Laurène" in tracks_text
+    assert not (out / "plan.yaml").exists()
 
 
-def test_converted_file_gives_the_same_plan(old_config, tmp_path, monkeypatch):
+def test_converted_files_give_the_same_plan(old_config, tmp_path, monkeypatch):
     for name in settings.ALL_VARS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
-    target = tmp_path / "plan.yaml"
-    assert run(str(old_config), str(target)).returncode == 0
+    out = tmp_path / "out"
+    assert run(str(old_config), str(out)).returncode == 0
 
     old = old_module(old_config)
     old_plan = generate_plan.generate_plan(
@@ -120,7 +125,7 @@ def test_converted_file_gives_the_same_plan(old_config, tmp_path, monkeypatch):
             holidays=old["HOLIDAYS"], evolution_tracks=old["EVOLUTION_TRACKS"]
         ),
     )
-    new_plan = generate_plan.generate_plan(inventory(), plan_file.load(target))
+    new_plan = generate_plan.generate_plan(inventory(), plan_file.load(out))
 
     assert new_plan["allWeeks"] == old_plan["allWeeks"]
     # The check means something only when the tracks and holidays are used.
@@ -129,32 +134,122 @@ def test_converted_file_gives_the_same_plan(old_config, tmp_path, monkeypatch):
     assert any("Anniversary" in o or "Birthday" in o for o in occasions)
 
 
-def test_existing_target_is_not_overwritten(old_config, tmp_path):
-    target = tmp_path / "plan.yaml"
-    target.write_text("keep me\n", encoding="utf-8")
-    result = run(str(old_config), str(target))
+@pytest.mark.parametrize("existing", ["holidays.yaml", "evolution_tracks.yaml"])
+def test_existing_file_blocks_all_writes(old_config, tmp_path, existing):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / existing).write_text("keep me\n", encoding="utf-8")
+    result = run(str(old_config), str(out))
     assert result.returncode == 1
     assert "exists" in result.stderr
-    assert target.read_text(encoding="utf-8") == "keep me\n"
+    assert str(out / existing) in result.stderr
+    assert (out / existing).read_text(encoding="utf-8") == "keep me\n"
+    # No other file appears, so the folder is as it was.
+    assert [p.name for p in out.iterdir()] == [existing]
+
+
+def test_v3_file_with_only_holidays_writes_only_holidays(tmp_path):
+    source = tmp_path / "plan_config.py"
+    source.write_text('HOLIDAYS = [("Birthday", 1, 15)]\n', encoding="utf-8")
+    out = tmp_path / "out"
+    result = run(str(source), str(out))
+    assert result.returncode == 0, result.stderr
+    assert [p.name for p in out.iterdir()] == ["holidays.yaml"]
+
+
+def test_v3_file_with_only_tracks_writes_only_tracks(tmp_path):
+    source = tmp_path / "plan_config.py"
+    source.write_text(
+        "EVOLUTION_TRACKS = [dict(label='L', name_fragment='l',"
+        " season_months=(10, 11), preferred_month=11)]\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = run(str(source), str(out))
+    assert result.returncode == 0, result.stderr
+    assert [p.name for p in out.iterdir()] == ["evolution_tracks.yaml"]
+
+
+def test_output_folder_is_created(old_config, tmp_path):
+    out = tmp_path / "a" / "b" / "config"
+    result = run(str(old_config), str(out))
+    assert result.returncode == 0, result.stderr
+    assert (out / "holidays.yaml").is_file()
+    assert (out / "evolution_tracks.yaml").is_file()
 
 
 def test_missing_source_is_an_error(tmp_path):
-    result = run(str(tmp_path / "nope.py"), str(tmp_path / "plan.yaml"))
+    out = tmp_path / "out"
+    result = run(str(tmp_path / "nope.py"), str(out))
     assert result.returncode == 1
     assert "not found" in result.stderr
-    assert not (tmp_path / "plan.yaml").exists()
+    assert not out.exists()
 
 
 def test_source_that_fails_the_check_writes_nothing(tmp_path):
     source = tmp_path / "plan_config.py"
     source.write_text('HOLIDAYS = [("Bad", 13, 1)]\n', encoding="utf-8")
-    result = run(str(source), str(tmp_path / "plan.yaml"))
+    out = tmp_path / "out"
+    result = run(str(source), str(out))
     assert result.returncode == 1
     assert "holidays[0].month" in result.stderr
-    assert not (tmp_path / "plan.yaml").exists()
+    assert not out.exists()
 
 
-def test_wrong_argument_count_is_usage_error():
-    result = run("only-one")
+def test_bad_tracks_stop_before_the_good_holidays_are_written(tmp_path):
+    source = tmp_path / "plan_config.py"
+    source.write_text(
+        'HOLIDAYS = [("Birthday", 1, 15)]\n'
+        "EVOLUTION_TRACKS = [dict(label='L', name_fragment='l',"
+        " season_months=(12, 2), preferred_month=1)]\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = run(str(source), str(out))
+    assert result.returncode == 1
+    assert "evolution_tracks[0].season_months" in result.stderr
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("args", [("only-one",), ("a", "b", "c")])
+def test_wrong_argument_count_is_usage_error(args):
+    result = run(*args)
     assert result.returncode == 2
     assert "Usage" in result.stderr
+    assert "<config_dir>" in result.stderr
+
+
+def test_v3_file_with_neither_setting_is_an_error(tmp_path):
+    source = tmp_path / "plan_config.py"
+    source.write_text("OTHER = 1\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = run(str(source), str(out))
+
+    assert result.returncode == 1
+    assert "has no HOLIDAYS and no EVOLUTION_TRACKS" in result.stderr
+    assert not out.exists()
+
+
+def test_failed_write_removes_the_files_already_written(
+    old_config, tmp_path, monkeypatch, capsys
+):
+    import convert_plan_config
+
+    out = tmp_path / "out"
+    real_write = Path.write_text
+
+    def write_text(self, *args, **kwargs):
+        if self.name == plan_file.TRACKS_FILE:
+            # The other file is on disk, so the rollback has work to do.
+            assert (self.parent / plan_file.HOLIDAYS_FILE).exists()
+            # A real failure can come after the file is made.
+            real_write(self, "partial", encoding="utf-8")
+            raise OSError(28, "No space left on device")
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", write_text)
+
+    assert convert_plan_config.main([str(old_config), str(out)]) == 1
+    assert "Error: cannot write to" in capsys.readouterr().err
+    assert list(out.iterdir()) == []

@@ -2,7 +2,10 @@
 .env
 .env.secrets
 scripts/plan_config.py
+# The older single plan file. A host can still have it.
 config/plan.yaml
+config/holidays.yaml
+config/evolution_tracks.yaml
 
 # Generated data
 data/
