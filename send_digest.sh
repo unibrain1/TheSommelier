@@ -23,8 +23,8 @@ rc=0
 python3 scripts/send_digest.py "$@" || rc=$?
 
 # Only a run with no arguments (the scheduled run) pings. A manual run with
-# --dry-run or --force must not mark the check as down. Exit with the same code so supercronic still
-# logs the failed job.
+# --dry-run or --force must not mark the check as down. Exit with the same
+# code so supercronic still logs the failed job.
 if [[ $# -eq 0 && ${rc} -ne 0 ]]; then
   message="Digest send failed. Check container logs for details."
   if [[ ${rc} -eq 3 ]]; then
