@@ -147,7 +147,7 @@ def test_failure_exits_zero_with_warning(server, capsys):
     captured = capsys.readouterr()
     assert rc == 0
     assert len(server.requests) == 3
-    assert captured.err.strip() == WARNING
+    assert captured.err.strip() == f"{WARNING} (HTTPError HTTP 500)"
 
 
 def _closed_port_url():
@@ -178,14 +178,45 @@ def test_key_never_in_output(server, clean_env, capsys, failure):
         rc = healthcheck.main(["success", "hi"])
         captured = capsys.readouterr()
         assert rc == 0
-        assert captured.err.strip() == WARNING
+        assert captured.err.strip() == f"{WARNING} (URLError)"
         assert KEY not in captured.out + captured.err
         clean_env.setattr(healthcheck.urllib.request, "urlopen", refuse)
     rc = healthcheck.main(["fail", "hi"])
     captured = capsys.readouterr()
     assert rc == 0
-    assert captured.err.strip() == WARNING
+    expected = {
+        "http_error": "HTTPError HTTP 500",
+        "timeout": "TimeoutError",
+        "connection_refused": "URLError",
+    }[failure]
+    assert captured.err.strip() == f"{WARNING} ({expected})"
     assert KEY not in captured.out + captured.err
+
+
+def test_http_error_prints_class_and_code_only(server, clean_env, capsys):
+    url = f"{server.base}/{KEY}/the-sommelier"
+
+    def not_found(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, 404, f"no {url}", {}, None)
+
+    clean_env.setattr(healthcheck.urllib.request, "urlopen", not_found)
+    assert healthcheck.main(["fail", "hi"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err.strip() == f"{WARNING} (HTTPError HTTP 404)"
+    assert KEY not in captured.out + captured.err
+    assert "127.0.0.1" not in captured.out + captured.err
+
+
+def test_url_error_prints_class_only(server, clean_env, capsys):
+    def refuse(request, timeout=None):
+        raise urllib.error.URLError(f"refused {request.full_url}")
+
+    clean_env.setattr(healthcheck.urllib.request, "urlopen", refuse)
+    assert healthcheck.main(["fail", "hi"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err.strip() == f"{WARNING} (URLError)"
+    assert KEY not in captured.out + captured.err
+    assert "127.0.0.1" not in captured.out + captured.err
 
 
 def test_error_text_with_url_is_not_printed(server, clean_env, capsys):
@@ -253,7 +284,7 @@ def test_script_exit_codes_and_no_key_in_output(server):
         text=True,
     )
     assert dead.returncode == 0
-    assert dead.stderr.strip() == WARNING
+    assert dead.stderr.strip() == f"{WARNING} (URLError)"
     assert KEY not in dead.stdout + dead.stderr
 
     bad = subprocess.run(

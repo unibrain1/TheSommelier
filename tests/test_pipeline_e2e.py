@@ -34,7 +34,13 @@ from tests.helpers import (
 )
 
 REPO = Path(__file__).resolve().parent.parent
-SHELL_SCRIPTS = ("pipeline.sh", "fetch.sh", "fetch_docker.sh", "send_digest.sh")
+SHELL_SCRIPTS = (
+    "pipeline.sh",
+    "fetch.sh",
+    "fetch_docker.sh",
+    "send_digest.sh",
+    "sync.sh",
+)
 KEY_CANARY = "canary-key-7f3a9c1e5b"
 FAKE_USER = "fake-user"
 FAKE_PASSWORD = "fake-password-canary"
@@ -451,6 +457,10 @@ def test_pipeline_failure_sends_fail_ping(harness):
     # The fake ran, and it failed the inventory fetch.
     assert any("Table=Inventory" in u for u in harness.curl_urls())
     assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    body = harness.server.posts[0][1]
+    assert "Pipeline failed at step: fetch." in body
+    assert KEY_CANARY not in body
+    assert FAKE_PASSWORD not in body
     assert KEY_CANARY not in result.stdout
     assert KEY_CANARY not in result.stderr
 
@@ -463,6 +473,7 @@ def test_pipeline_settings_failure_sends_fail_ping(harness):
 
     assert result.returncode != 0, _output(result)
     assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    assert "Pipeline failed at step: settings." in harness.server.posts[0][1]
     # No fetch ran.
     assert harness.curl_urls() == []
     assert KEY_CANARY not in result.stdout
@@ -479,8 +490,43 @@ def test_pipeline_success_sends_ping(harness):
     body = harness.server.posts[0][1]
     assert f"Bottles: {BOTTLES}" in body
     assert "Weeks planned: 52" in body
+    # The local server is http, so the settings check warns once.
+    assert (
+        "Warnings: 1\n- WARNING: HEALTHCHECK_URL uses http. The value holds a secret. "
+        "Use https.\nTime: "
+    ) in body
     assert KEY_CANARY not in result.stdout
     assert KEY_CANARY not in result.stderr
+
+
+def test_degraded_run_success_ping_counts_and_lists_warnings(harness):
+    """A settings warning (incomplete digest) and a failed note step both count."""
+    path = _stub_claude(harness.root) + os.pathsep + harness.path
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+            # Only one SMTP setting puts the digest in the incomplete state.
+            "SMTP_USERNAME": "sender@example.test",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier"]
+    body = harness.server.posts[0][1]
+    lines = body.splitlines()
+    count = next(int(s.split(": ")[1]) for s in lines if s.startswith("Warnings: "))
+    listed = [s for s in lines if s.startswith("- WARNING: ")]
+    assert count == len(listed)
+    assert count >= 2
+    assert any(s.startswith("- WARNING: digest is off.") for s in listed), body
+    assert "- WARNING: Note generation failed — plan will have empty notes" in lines
+    assert "Pipeline completed successfully." in body
+    for secret in (KEY_CANARY, "key-canary-9d2c", FAKE_PASSWORD):
+        assert secret not in body
 
 
 def test_pipeline_ignores_the_old_healthcheck_variables(harness):
@@ -706,6 +752,116 @@ def _write_digest(site: Path, html: str = "<html>digest</html>") -> None:
     )
 
 
+_SMTP_DOTENV = (
+    "SMTP_USERNAME='sender@example.test'\n"
+    "SMTP_PASSWORD='smtp-pw-canary'\n"
+    "DIGEST_RECIPIENTS='a@example.test'\n"
+)
+
+
+def test_send_digest_sh_stale_digest_sends_fail_ping(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    _write_digest(site)
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
+
+    result = harness.run("send_digest.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode == 3, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    body = harness.server.posts[0][1]
+    assert body == (
+        "Digest not sent: digest.json is not for today. The last sync did not "
+        "finish, or it did not make a new digest."
+    )
+    assert "smtp-pw-canary" not in body
+
+
+def test_send_digest_sh_failed_send_sends_fail_ping(harness):
+    """No digest.json is a failed send, not a stale digest."""
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
+
+    result = harness.run("send_digest.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode == 1, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    assert harness.server.posts[0][1] == (
+        "Digest send failed. Check container logs for details."
+    )
+
+
+@pytest.mark.parametrize("args", [("--dry-run",), ("--force", "--dry-run")])
+def test_send_digest_sh_manual_run_sends_no_ping(harness, args):
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
+
+    result = harness.run(
+        "send_digest.sh", args=args, extra=_enable_healthcheck(harness)
+    )
+
+    assert result.returncode == 1, _output(result)
+    assert harness.server.posts == []
+
+
+def _digest_not_sent_case(harness: Harness, case: str) -> None:
+    """Set up one of the good states in which the scheduled digest sends nothing."""
+    if case == "not_configured":
+        return
+    import send_digest
+
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    today = send_digest._today_local()
+    has_content = case == "already_sent"
+    (site / "digest.html").write_text("<html>digest</html>", encoding="utf-8")
+    (site / "digest.json").write_text(
+        json.dumps({"date": today, "has_content": has_content, "wine": None}),
+        encoding="utf-8",
+    )
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
+    if case == "already_sent":
+        # SITE_DIR is inside DATA_DIR, so the folder exists.
+        data = Path(harness.env["DATA_DIR"])
+        (data / "digest_last_sent.txt").write_text(today, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("not_configured", "Digest email not configured"),
+        ("nothing_to_send", "Nothing to send (no menu today)"),
+        ("already_sent", "Digest already sent today"),
+    ],
+)
+def test_send_digest_sh_good_scheduled_run_sends_no_ping(harness, case, message):
+    """A scheduled run that exits 0 must not ping, whatever the reason."""
+    _digest_not_sent_case(harness, case)
+
+    result = harness.run("send_digest.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode == 0, _output(result)
+    assert message in result.stdout, _output(result)
+    assert harness.server.posts == []
+
+
+def _fake_flock(harness: Harness, rc: int) -> str:
+    """Return a PATH with a `flock` that only exits with rc. The host can lack flock."""
+    return _stub_bin(harness.root, "flock", rc) + os.pathsep + harness.path
+
+
+def test_sync_sh_logs_the_cause_of_a_skipped_run(harness):
+    result = harness.run("sync.sh", extra={"PATH": _fake_flock(harness, 75)})
+
+    assert result.returncode == 0, _output(result)
+    assert "Skipping sync: another sync holds /tmp/sync.lock" in result.stdout
+
+
+def test_sync_sh_keeps_the_exit_code_of_a_failed_run(harness):
+    result = harness.run("sync.sh", extra={"PATH": _fake_flock(harness, 1)})
+
+    assert result.returncode == 1, _output(result)
+    assert "Skipping sync" not in result.stdout + result.stderr
+
+
 def test_send_digest_sh_dry_run_without_op(harness):
     run = harness.run("fetch_docker.sh")
     assert run.returncode == 0, _output(run)
@@ -730,11 +886,7 @@ def test_send_digest_sh_with_dotenv_reads_site_folder_of_the_app(harness):
     site.mkdir()
     html = "<html>" + "x" * 94 + "</html>"
     _write_digest(site, html)
-    (harness.app / ".env").write_text(
-        "SMTP_USERNAME='sender@example.test'\n"
-        "SMTP_PASSWORD='smtp-pw-canary'\n"
-        "DIGEST_RECIPIENTS='a@example.test'\n"
-    )
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
 
     result = harness.run(
         "send_digest.sh",
@@ -859,17 +1011,152 @@ def test_pipeline_failure_after_success_ping_sends_no_fail_ping(harness):
     assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier"]
 
 
+def _stub_bin(root: Path, name: str, rc: int) -> str:
+    """Return a new PATH folder that holds a `name` that only exits with rc."""
+    folder = root / f"{name}bin"
+    folder.mkdir()
+    stub = folder / name
+    stub.write_text(f"#!/usr/bin/env bash\nexit {rc}\n")
+    stub.chmod(0o755)
+    return str(folder)
+
+
+def test_partial_notes_count_as_incomplete(harness):
+    """A Claude reply with a note for week 1 only leaves the other weeks empty."""
+    claude_bin = harness.root / "partialbin"
+    claude_bin.mkdir()
+    stub = claude_bin / "claude"
+    stub.write_text('#!/usr/bin/env bash\necho \'{"1": "A bright, fresh wine."}\'\n')
+    stub.chmod(0o755)
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": str(claude_bin) + os.pathsep + harness.path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "notes missing: weeks 2, 3," in result.stderr
+    lines = harness.server.posts[0][1].splitlines()
+    assert "- WARNING: Note generation incomplete — plan has empty notes" in lines
+
+
+def test_plan_failure_names_the_plan_step(harness):
+    (harness.app / "config" / "holidays.yaml").write_text("holidays: 42\n")
+
+    result = harness.run("fetch_docker.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode != 0, _output(result)
+    assert "Plan generation failed" in result.stdout
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    assert "Pipeline failed at step: plan." in harness.server.posts[0][1]
+
+
 def _stub_claude(root: Path) -> str:
     """Return a PATH folder that holds a `claude` that always fails.
 
     generate_notes.py and enrich_menu.py treat a failing CLI as non-fatal.
     """
-    claude_bin = root / "claudebin"
-    claude_bin.mkdir()
-    stub = claude_bin / "claude"
-    stub.write_text("#!/usr/bin/env bash\nexit 1\n")
+    return _stub_bin(root, "claude", 1)
+
+
+def _stub_claude_notes(root: Path) -> str:
+    """Return a PATH folder that holds a `claude` with a note for weeks 1 to 60.
+
+    generate_notes.py skips a key that is not a week of the batch, so one reply
+    serves every batch. The stub also answers enrich_menu.py with this text.
+    """
+    folder = root / "notesbin"
+    folder.mkdir()
+    reply = folder / "reply.json"
+    reply.write_text(
+        json.dumps(
+            {str(week): f"A fine note for week {week}." for week in range(1, 61)}
+        )
+    )
+    stub = folder / "claude"
+    stub.write_text(f"#!/usr/bin/env bash\ncat '{reply}'\n")
     stub.chmod(0o755)
-    return str(claude_bin)
+    return str(folder)
+
+
+def _warning_lines(body: str) -> tuple[int, list[str]]:
+    lines = body.splitlines()
+    count = next(int(s.split(": ")[1]) for s in lines if s.startswith("Warnings: "))
+    return count, [s for s in lines if s.startswith("- WARNING: ")]
+
+
+def test_complete_notes_add_no_note_warning(harness):
+    path = _stub_claude_notes(harness.root) + os.pathsep + harness.path
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+        drop=MENU_OFF,
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "Generating tasting notes" in result.stdout
+    # The stub filled all 52 weeks: the plan has no empty note.
+    plan = json.loads((Path(harness.env["SITE_DIR"]) / "plan.json").read_text())
+    assert [w["week"] for w in plan["allWeeks"] if not w["note"]] == []
+    body = harness.server.posts[0][1]
+    count, listed = _warning_lines(body)
+    assert "Note generation" not in body
+    # Only the settings warning for the http HEALTHCHECK_URL is left.
+    assert count == len(listed) == 1, body
+    assert listed[0].startswith("- WARNING: HEALTHCHECK_URL uses http."), body
+    assert "key-canary-9d2c" not in body
+
+
+def test_claude_on_without_cli_lists_both_skip_warnings(harness):
+    # harness.path holds no `claude`: the fixture skips the test if it does.
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier"]
+    body = harness.server.posts[0][1]
+    count, listed = _warning_lines(body)
+    assert count == len(listed)
+    lines = body.splitlines()
+    assert "- WARNING: Skipping note generation — claude CLI not available" in lines
+    assert "- WARNING: Skipping menu enrichment — claude CLI not available" in lines
+    for secret in (KEY_CANARY, "key-canary-9d2c", FAKE_PASSWORD):
+        assert secret not in body
+
+
+@pytest.mark.parametrize(
+    ("step", "script"),
+    [
+        ("parse", "parse_inventory.py"),
+        ("compare", "compare.py"),
+        ("pairing", "pairing.py"),
+    ],
+)
+def test_failed_step_names_the_step_in_the_fail_ping(harness, step, script):
+    (harness.app / "scripts" / script).write_text("raise SystemExit(1)\n")
+
+    result = harness.run("fetch_docker.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode != 0, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    body = harness.server.posts[0][1]
+    assert f"Pipeline failed at step: {step}." in body
+    for secret in (KEY_CANARY, FAKE_PASSWORD, ICS_URL):
+        assert secret not in body
 
 
 @pytest.mark.parametrize(

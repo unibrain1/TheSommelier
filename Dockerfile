@@ -38,7 +38,8 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r /tmp/requirements.tx
 RUN groupadd -g 1000 ansible && useradd -u 1000 -g 1000 -m ansible
 
 # HOME=/tmp because the root file system is read-only at run time. The Claude CLI writes its config there.
-ENV HOME=/tmp PYTHONDONTWRITEBYTECODE=1
+# PYTHONUNBUFFERED=1 keeps Python output and shell output in their order in docker logs.
+ENV HOME=/tmp PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
 # The image holds the main nginx config. The process runs as UID 1000, so it keeps its pid and temp files in /tmp.
 COPY nginx.conf /etc/nginx/nginx.conf

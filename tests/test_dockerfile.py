@@ -12,6 +12,7 @@ SCRIPTS = (
     "fetch.sh",
     "fetch_docker.sh",
     "send_digest.sh",
+    "sync.sh",
 )
 
 
@@ -74,6 +75,28 @@ def test_entrypoint_reads_schedules_from_settings(getter, var):
         code,
     )
     assert not re.search(rf"\$\{{?{var}\b", code)
+
+
+def test_sync_script_runs_the_sync_under_a_lock_with_its_own_skip_code():
+    # -E 75 keeps a skipped run apart from a failed run, which also exits 1.
+    code = "\n".join(_code_lines("sync.sh"))
+    assert re.search(
+        r"^flock -n -E 75 -o /tmp/sync\.lock bash fetch_docker\.sh\b", code, re.M
+    )
+    assert re.search(r"-eq 75 \]\]", code)
+
+
+def test_entrypoint_starts_every_sync_through_sync_script():
+    code = "\n".join(_code_lines("entrypoint.sh"))
+    assert re.search(r"^printf '%s cd /app && bash sync\.sh\\n' ", code, re.M)
+    assert re.search(r"^bash /app/sync\.sh \|\| ", code, re.M)
+    assert "flock" not in code
+    assert "fetch_docker.sh" not in code
+
+
+def test_dockerfile_env_sets_pythonunbuffered():
+    env = " ".join(_instructions("ENV")).split()
+    assert "PYTHONUNBUFFERED=1" in env
 
 
 def test_dockerfile_user_is_numeric_and_not_root():
@@ -159,6 +182,7 @@ def test_dockerignore_excludes(path):
         "scripts/container_health.py",
         "entrypoint.sh",
         "fetch_docker.sh",
+        "sync.sh",
         "requirements.txt",
         "nginx.conf",
         "site/index.html",

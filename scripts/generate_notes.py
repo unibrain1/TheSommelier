@@ -10,6 +10,14 @@ CLAUDE_CODE_OAUTH_TOKEN (subscription mode). pipeline.sh runs this script only
 when settings.py reports the claude feature on. wine_utils.call_claude passes
 the key of the chosen mode to the CLI.
 
+Exit codes:
+  0  every week that needed a note has one
+  1  no notes made while notes were needed, a usage error, or a crash
+  3  some notes are missing. stderr names the weeks
+
+With exit 3, or with exit 1 because no notes were made, the script still
+writes plan.json with the notes it made.
+
 Usage: generate_notes.py <plan.json> [notes.tsv] [foodtags.tsv] [community_notes.json] [inventory.json]
 """
 
@@ -17,6 +25,7 @@ import csv
 import json
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 from wine_utils import call_claude, extract_json
 
@@ -24,6 +33,13 @@ BATCH_SIZE = 20  # bottles per Claude call to stay within context
 # The prompt asks for 1-2 sentences. A longer reply is not a note, and the
 # site publishes plan.json with no login.
 MAX_NOTE_CHARS = 400
+
+
+class NotesResult(NamedTuple):
+    """How many weeks needed a note, and which weeks still have none."""
+
+    needed: int
+    missing: list[int]
 
 
 def valid_note(note: object) -> str | None:
@@ -186,8 +202,12 @@ def generate_notes(
     foodtags_path: str | None = None,
     community_notes_path: str | None = None,
     inventory_path: str | None = None,
-) -> None:
-    """Generate notes for plan entries with empty notes."""
+) -> NotesResult:
+    """Generate notes for plan entries with empty notes.
+
+    Returns the count of weeks that needed a note and the sorted week numbers
+    that still have no note.
+    """
     plan_data = json.loads(Path(plan_path).read_text())
     all_weeks = plan_data.get("allWeeks", [])
 
@@ -213,7 +233,7 @@ def generate_notes(
     needs_notes = [w for w in all_weeks if not w.get("note")]
     if not needs_notes:
         print("All entries already have notes.")
-        return
+        return NotesResult(needed=0, missing=[])
 
     print(f"Generating notes for {len(needs_notes)} entries...")
 
@@ -227,7 +247,7 @@ def generate_notes(
         print(f"  Batch {i // BATCH_SIZE + 1}: {len(batch)} wines...")
         response = call_claude(prompt)
         if not response:
-            print("  WARNING: Empty response for batch, skipping")
+            print("WARNING: Empty response for batch, skipping", file=sys.stderr)
             continue
 
         notes = extract_json(response)
@@ -257,19 +277,43 @@ def generate_notes(
         json.dumps(plan_data, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     print(f"Generated {notes_generated} notes.")
+    missing = sorted(w["week"] for w in needs_notes if not w.get("note"))
+    return NotesResult(needed=len(needs_notes), missing=missing)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
+def main(argv: list[str]) -> int:
+    """Run the script and return its exit code."""
+    if len(argv) < 2:
         print(
             "Usage: generate_notes.py <plan.json> [notes.tsv] [foodtags.tsv] [community_notes.json] [inventory.json]",
             file=sys.stderr,
         )
-        sys.exit(1)
-    generate_notes(
-        sys.argv[1],
-        sys.argv[2] if len(sys.argv) > 2 else None,
-        sys.argv[3] if len(sys.argv) > 3 else None,
-        sys.argv[4] if len(sys.argv) > 4 else None,
-        sys.argv[5] if len(sys.argv) > 5 else None,
+        return 1
+    result = generate_notes(
+        argv[1],
+        argv[2] if len(argv) > 2 else None,
+        argv[3] if len(argv) > 3 else None,
+        argv[4] if len(argv) > 4 else None,
+        argv[5] if len(argv) > 5 else None,
     )
+    if not result.missing:
+        return 0
+    weeks = ", ".join(str(week) for week in result.missing)
+    # Exit 3 is a partial result. pipeline.sh treats each other non-zero code
+    # as a failed note step.
+    if len(result.missing) == result.needed:
+        print(
+            f"ERROR: No notes generated for any of {result.needed} weeks: {weeks}",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"WARNING: {len(result.missing)} of {result.needed} notes missing: "
+        f"weeks {weeks}",
+        file=sys.stderr,
+    )
+    return 3
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

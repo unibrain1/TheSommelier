@@ -5,19 +5,51 @@ set -euo pipefail
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
+# A degraded step logs a warning and the run goes on. The success ping counts
+# and lists the warnings, so a green ping does not hide a degraded run.
+# A string, not an array: bash 3.2 (macOS) fails on an empty array under set -u.
+WARNINGS=0
+WARNING_TEXT=""
+add_warning() {
+  WARNINGS=$((WARNINGS + 1))
+  WARNING_TEXT+=$'\n'"- $1"
+}
+warn() {
+  add_warning "WARNING: $*"
+  log "WARNING: $*"
+}
+
+# The fail ping names the step. Each name is fixed text, so no secret goes
+# into the ping. A step that warns and goes on shows only after a crash or a
+# signal, because its own failures do not stop the run.
+STEP="settings"
+
 # Send failure ping on any non-zero exit. EXIT, not ERR: each step stops the
 # run with its own `|| { ...; exit 1; }`, and an explicit exit does not fire ERR.
 ping_on_failure() {
   local rc=$?
   if [[ ${rc} -ne 0 ]]; then
-    python3 scripts/healthcheck.py fail "Pipeline failed. Check container logs for details."
+    python3 scripts/healthcheck.py fail "Pipeline failed at step: ${STEP}. Check container logs for details."
   fi
 }
 trap ping_on_failure EXIT
 
 # --- SETTINGS ---
 log "==> Checking settings..."
-python3 scripts/settings.py check || { log "ERROR: Settings check failed"; exit 1; }
+# The settings check writes its warnings and errors to stderr. Keep that text,
+# print it again, and count the WARNING: lines. No settings line holds a value
+# (settings.check_lines).
+SETTINGS_RC=0
+{ SETTINGS_ERR=$(python3 scripts/settings.py check 2>&1 >&3) || SETTINGS_RC=$?; } 3>&1
+if [[ -n "${SETTINGS_ERR}" ]]; then
+  printf '%s\n' "${SETTINGS_ERR}" >&2
+fi
+while IFS= read -r line; do
+  if [[ "${line}" == WARNING:* ]]; then
+    add_warning "${line}"
+  fi
+done <<< "${SETTINGS_ERR}"
+[[ ${SETTINGS_RC} -eq 0 ]] || { log "ERROR: Settings check failed"; exit 1; }
 DATA_DIR=$(python3 scripts/settings.py get data_dir)
 SITE_DIR=$(python3 scripts/settings.py get site_dir)
 mkdir -p "${DATA_DIR}" "${SITE_DIR}"
@@ -47,6 +79,7 @@ ct_fetch() {
     | curl -sSf "${CURL_TIMEOUTS[@]}" -K - -o "$2"
 }
 
+STEP="fetch"
 MENU_ON=0
 MENU_FETCH_LOG="" MENU_DOWNLOAD_LOG="" MENU_PARSE_LOG=""
 if python3 scripts/settings.py enabled menu; then
@@ -78,16 +111,16 @@ else
   # lost setting (a typo, a dropped env_file line) would remove the menu with
   # only an info line in the log, so a removal of published pairings warns.
   if [[ -f "${SITE_DIR}/pairing_suggestions.json" ]]; then
-    log "WARNING: menu feature is off — removing the pairings of an earlier run"
+    warn "menu feature is off — removing the pairings of an earlier run"
   fi
   rm -f "${DATA_DIR}/menu.ics" "${DATA_DIR}/menu.json" "${DATA_DIR}/pairing_suggestions.json" "${SITE_DIR}/pairing_suggestions.json"
   log "    Skipping menu calendar — menu feature is off"
 fi
 
 wait $PID_CT || { log "ERROR: CellarTracker inventory fetch failed"; exit 1; }
-wait $PID_NOTES || { log "WARNING: CellarTracker notes fetch failed — continuing without notes"; }
-wait $PID_FOOD || { log "WARNING: CellarTracker food tags fetch failed — continuing without food tags"; }
-wait $PID_CONSUMED || { log "WARNING: CellarTracker consumed fetch failed — continuing without consumed data"; }
+wait $PID_NOTES || warn "CellarTracker notes fetch failed — continuing without notes"
+wait $PID_FOOD || warn "CellarTracker food tags fetch failed — continuing without food tags"
+wait $PID_CONSUMED || warn "CellarTracker consumed fetch failed — continuing without consumed data"
 if [[ ${MENU_ON} -eq 1 ]]; then
   wait "$PID_CAL" || { log "ERROR: Google Calendar fetch failed — check GOOGLE_CALENDAR_ICS_URL"; exit 1; }
 fi
@@ -96,6 +129,7 @@ LINES=$(wc -l < "${DATA_DIR}/inventory.tsv" | tr -d ' ')
 log "    Downloaded $((LINES - 1)) bottles + notes + food tags + consumed${MENU_DOWNLOAD_LOG}"
 
 # --- PARSE (scripted) ---
+STEP="parse"
 log "==> Parsing inventory${MENU_PARSE_LOG}..."
 python3 scripts/parse_inventory.py "${DATA_DIR}/inventory.tsv" > "${DATA_DIR}/inventory.json" &
 PID_INV=$!
@@ -115,35 +149,47 @@ if [[ ${MENU_ON} -eq 1 ]]; then
   wait "$PID_MENU" || { log "ERROR: Menu parse failed"; exit 1; }
 fi
 if [[ -n "${PID_CONSUMED_PARSE:-}" ]]; then
-  wait "$PID_CONSUMED_PARSE" || { log "WARNING: Consumed parse failed — continuing without consumed data"; }
+  wait "$PID_CONSUMED_PARSE" || warn "Consumed parse failed — continuing without consumed data"
 fi
 
 # --- FETCH COMMUNITY NOTES (RSS) ---
+STEP="community notes"
 if python3 scripts/settings.py enabled community_notes; then
   log "==> Fetching community tasting notes (RSS)..."
-  python3 scripts/fetch_community_notes.py "${DATA_DIR}/community_notes.json" || log "WARNING: Community notes fetch failed — continuing without community notes"
+  python3 scripts/fetch_community_notes.py "${DATA_DIR}/community_notes.json" || warn "Community notes fetch failed — continuing without community notes"
 else
   log "    Skipping community notes — community notes feature is off"
 fi
 
 # --- GENERATE PLAN to staging (scripted — rules-based) ---
 # Build new plan in DATA_DIR first, only publish to SITE_DIR when complete with notes
+STEP="plan"
 log "==> Generating plan..."
 python3 scripts/generate_plan.py "${DATA_DIR}/inventory.json" "${DATA_DIR}/plan.json" || { log "ERROR: Plan generation failed"; exit 1; }
 
 # --- GENERATE NOTES (LLM — Claude Code CLI, augmented with CT notes) ---
+STEP="notes"
 CLAUDE_ON=0
 python3 scripts/settings.py enabled claude && CLAUDE_ON=1
 if [[ ${CLAUDE_ON} -eq 0 ]]; then
   log "    Skipping note generation — Claude feature is off"
 elif ! command -v claude &> /dev/null; then
-  log "    Skipping note generation — claude CLI not available"
+  # The feature is on, so the operator expects notes.
+  warn "Skipping note generation — claude CLI not available"
 else
   log "==> Generating tasting notes (Claude)..."
-  python3 scripts/generate_notes.py "${DATA_DIR}/plan.json" "${DATA_DIR}/notes.tsv" "${DATA_DIR}/foodtags.tsv" "${DATA_DIR}/community_notes.json" "${DATA_DIR}/inventory.json" || log "WARNING: Note generation failed — plan will have empty notes"
+  # Exit 3: some weeks have no note. generate_notes.py names them.
+  NOTES_RC=0
+  python3 scripts/generate_notes.py "${DATA_DIR}/plan.json" "${DATA_DIR}/notes.tsv" "${DATA_DIR}/foodtags.tsv" "${DATA_DIR}/community_notes.json" "${DATA_DIR}/inventory.json" || NOTES_RC=$?
+  if [[ ${NOTES_RC} -eq 3 ]]; then
+    warn "Note generation incomplete — plan has empty notes"
+  elif [[ ${NOTES_RC} -ne 0 ]]; then
+    warn "Note generation failed — plan will have empty notes"
+  fi
 fi
 
 # --- COMPARE & PAIR (scripted) ---
+STEP="compare"
 log "==> Comparing inventory vs plan..."
 python3 scripts/compare.py "${DATA_DIR}/inventory.json" "${DATA_DIR}/plan.json" > "${DATA_DIR}/report.json" || { log "ERROR: Compare failed"; exit 1; }
 
@@ -151,20 +197,23 @@ python3 scripts/compare.py "${DATA_DIR}/inventory.json" "${DATA_DIR}/plan.json" 
 # With the menu off there is no menu.json, so enrichment and pairing have no
 # input. The fetch step logs the skip line.
 if [[ ${MENU_ON} -eq 1 ]]; then
+  STEP="menu enrichment"
   if [[ ${CLAUDE_ON} -eq 0 ]]; then
     log "    Skipping menu enrichment — Claude feature is off"
   elif ! command -v claude &> /dev/null; then
-    log "    Skipping menu enrichment — claude CLI not available"
+    warn "Skipping menu enrichment — claude CLI not available"
   else
     log "==> Enriching menu entries (Claude)..."
-    python3 scripts/enrich_menu.py "${DATA_DIR}/menu.json" "${DATA_DIR}/menu_enriched.json" "${DATA_DIR}/menu_enriched_full.json" || log "WARNING: Menu enrichment failed — pairing will use keyword matching only"
+    python3 scripts/enrich_menu.py "${DATA_DIR}/menu.json" "${DATA_DIR}/menu_enriched.json" "${DATA_DIR}/menu_enriched_full.json" || warn "Menu enrichment failed — pairing will use keyword matching only"
   fi
 
+  STEP="pairing"
   log "==> Generating pairing suggestions..."
   python3 scripts/pairing.py "${DATA_DIR}/menu.json" "${DATA_DIR}/plan.json" "${DATA_DIR}/inventory.json" "${DATA_DIR}/menu_enriched_full.json" > "${DATA_DIR}/pairing_suggestions.json" || { log "ERROR: Pairing failed"; exit 1; }
 fi
 
 # --- PUBLISH atomically (site always has a complete plan with notes) ---
+STEP="publish"
 log "==> Publishing to ${SITE_DIR}..."
 # container_health.py reads the mtime of the published plan.json as the time of
 # the last complete run. Do not use cp -p or touch -r: they keep the old mtime.
@@ -189,10 +238,11 @@ publish_ha_json() {
     mv -f "${tmp}" "${SITE_DIR}/$3"
   else
     rm -f "${tmp}" "${SITE_DIR}/$3"
-    log "WARNING: $1 failed (exit ${rc}) — removed $3"
+    warn "$1 failed (exit ${rc}) — removed $3"
   fi
 }
 
+STEP="home assistant"
 if python3 scripts/settings.py enabled home_assistant; then
   log "==> Generating Home Assistant JSON..."
   publish_ha_json thisweek.py "${DATA_DIR}/plan.json" thisweek.json
@@ -204,8 +254,9 @@ else
 fi
 
 # --- GENERATE DIGEST ---
+STEP="digest"
 log "==> Generating morning digest..."
-python3 scripts/generate_digest.py || { RC=$?; if [ "$RC" -eq 2 ]; then log "    Digest: nothing to send (routine day)"; else log "WARNING: Digest generation failed"; fi; }
+python3 scripts/generate_digest.py || { RC=$?; if [ "$RC" -eq 2 ]; then log "    Digest: nothing to send (routine day)"; else warn "Digest generation failed"; fi; }
 
 log "==> Sync complete."
 
@@ -219,4 +270,5 @@ python3 scripts/healthcheck.py success "Pipeline completed successfully.
 
 Bottles: ${BOTTLES}
 Weeks planned: ${PLANNED}
+Warnings: ${WARNINGS}${WARNING_TEXT}
 Time: $(date '+%Y-%m-%d %H:%M:%S')"

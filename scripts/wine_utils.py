@@ -218,10 +218,15 @@ def call_claude(prompt: str) -> str:
 
 
 def extract_json(text: str) -> dict:
-    """Extract JSON object from Claude's response."""
+    """Extract the JSON object from Claude's response.
+
+    Return {} and print a warning to stderr when the text has no valid JSON
+    object.
+    """
     start = text.find("{")
     end = text.rfind("}") + 1
     if start == -1 or end == 0:
+        print("WARNING: Claude response has no JSON object", file=sys.stderr)
         return {}
     try:
         return json.loads(text[start:end])

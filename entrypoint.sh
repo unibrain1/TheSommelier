@@ -31,13 +31,7 @@ nginx
 SCHEDULE=$(python3 /app/scripts/settings.py get sync_schedule) || exit 1
 DIGEST_SCHEDULE=$(python3 /app/scripts/settings.py get digest_schedule) || exit 1
 IFS=';' read -ra SYNC_EXPRS <<< "${SCHEDULE}"
-# supercronic does not overlap runs of one job, but the initial sync below is
-# not a supercronic job. The shared lock stops a scheduled run that starts
-# during the initial sync. A run that cannot get the lock is skipped.
-# -o keeps the lock out of child processes. Without it, a child process that
-# lives after the run keeps the lock open, and every later run is skipped.
-SYNC_LOCK=/tmp/sync.lock
-printf '%s cd /app && flock -n -o '"${SYNC_LOCK}"' bash fetch_docker.sh\n' "${SYNC_EXPRS[@]}" > /tmp/crontab
+printf '%s cd /app && bash sync.sh\n' "${SYNC_EXPRS[@]}" > /tmp/crontab
 echo "${DIGEST_SCHEDULE} cd /app && bash send_digest.sh" >> /tmp/crontab
 echo "    Scheduled sync: ${SCHEDULE}"
 echo "    Scheduled digest: ${DIGEST_SCHEDULE}"
@@ -48,7 +42,7 @@ supercronic /tmp/crontab &
 
 # Run the pipeline once (site is already serving)
 echo "==> Running initial sync..."
-flock -n -o "${SYNC_LOCK}" bash /app/fetch_docker.sh || echo "WARNING: Initial sync failed, serving stale plan"
+bash /app/sync.sh || echo "WARNING: Initial sync failed, serving stale plan"
 
 echo "==> Ready."
 tail -f /dev/null

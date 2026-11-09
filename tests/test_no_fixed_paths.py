@@ -12,6 +12,7 @@ SHELL_FILES = [
     "fetch.sh",
     "fetch_docker.sh",
     "entrypoint.sh",
+    "sync.sh",
 ]
 APP_PATH_IN_SHELL = re.compile(r"/app/(data|site)\b")
 FIXED_PATH_IN_SHELL = re.compile(r"""(^|[ "'=>(])(data|site)/""")
