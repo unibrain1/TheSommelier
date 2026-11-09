@@ -10,7 +10,7 @@ To set your own, save `config/holidays.yaml.sample` as `config/holidays.yaml`, o
 
 If a field is not valid, the sync stops with an error that names the file and the field, for example `/config/evolution_tracks.yaml: evolution_tracks[0].prefered_month: unknown field`. Each file allows only its own top-level key. If the sync cannot search the `config` folder, it stops with an error that names the folder. In Docker, user 1000 must be able to read and search the folder, for example after `chmod 755 config`.
 
-An old `plan.yaml` in the `config` folder is not used. The sync logs a warning that tells you to move its `holidays` to `holidays.yaml` and its `evolution_tracks` to `evolution_tracks.yaml`. Then delete `plan.yaml`.
+Only the v4.0.0 pre-release (edge) builds used a `plan.yaml` file. A `plan.yaml` in the `config` folder is not used. The sync logs a warning that tells you to move its `holidays` to `holidays.yaml` and its `evolution_tracks` to `evolution_tracks.yaml`. Then delete `plan.yaml`.
 
 ## Holidays
 

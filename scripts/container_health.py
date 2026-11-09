@@ -17,7 +17,7 @@ import urllib.request
 
 import settings
 
-SITE_URL = "http://127.0.0.1:8080/index.html"
+NGINX_INDEX_URL = "http://127.0.0.1:8080/index.html"
 TIMEOUT_SECONDS = 5
 
 
@@ -58,7 +58,7 @@ def check_plan() -> str | None:
     return None
 
 
-def main(url: str = SITE_URL) -> int:
+def main(url: str = NGINX_INDEX_URL) -> int:
     cause = check_site(url) or check_plan()
     if cause:
         print(cause)

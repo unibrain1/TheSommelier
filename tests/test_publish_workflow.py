@@ -35,6 +35,12 @@ def _dockerignore_includes() -> list:
     return [line[1:] for line in lines if line.startswith("!")]
 
 
+def test_the_workflow_has_no_one_time_note():
+    # The file is on main after the v4.0.0 release. A note about the time before
+    # is stale.
+    assert "reaches main" not in WORKFLOW.read_text(encoding="utf-8")
+
+
 def test_pull_request_build_starts_on_the_build_inputs(workflow):
     pull_request = _triggers(workflow)["pull_request"]
 

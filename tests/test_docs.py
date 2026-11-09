@@ -296,13 +296,12 @@ def test_docs_describe_both_files(name):
 
 
 # These name the old plan.yaml on purpose: the upgrade page, the release notes
-# and the old-file warning (docs/plan-configuration.md, CLAUDE.md). The
+# and the one old-file warning (docs/plan-configuration.md). The
 # private_paths line of .claude/project.md keeps it, because the owner's old
 # file stays on disk.
 OLD_FILE_ALLOWED = {
     UPGRADE_PAGE,
     "docs/plan-configuration.md",
-    "CLAUDE.md",
     ".claude/project.md",
 }
 
@@ -323,6 +322,28 @@ def test_the_old_file_allow_list_is_needed():
     # A name on the list that no longer names plan.yaml should leave the list.
     for name in OLD_FILE_ALLOWED - {UPGRADE_PAGE}:
         assert re.search(r"\bplan\.yaml\b", _text(name)), name
+
+
+def test_claude_md_has_no_ghcr_private_note():
+    assert "stays private" not in _text("CLAUDE.md")
+
+
+def test_features_gives_the_logo_rule():
+    section = _section(_text("docs/features.md"), "## Morning digest email")
+    for part in (
+        "`site/logo.png`",
+        "from the code",
+        "`SITE_URL` + `/logo.png`",
+        "`https://` URL",
+        "warning",
+    ):
+        assert part in section, part
+
+
+def test_the_old_file_warning_names_the_edge_builds():
+    text = _text("docs/plan-configuration.md")
+    assert "v4.0.0 pre-release (edge) builds used a `plan.yaml` file" in text
+    assert not re.search(r"\bv3\b", text)
 
 
 def test_the_quick_start_says_how_to_update_the_image():

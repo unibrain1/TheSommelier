@@ -59,7 +59,7 @@ The digest needs the menu feature. When the menu feature is off, the digest has 
 | `SMTP_FROM` | plain | value of `SMTP_USERNAME` |
 | `SITE_URL` | plain, optional | none |
 
-`SITE_URL` is the public URL of your site. The email may use it to show the logo.
+`SITE_URL` is the public URL of your site. The email embeds `site/logo.png` from the code in the image or the checkout, not from the run output. If that file is missing, the email uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set, or is not an `http://` or `https://` URL, the email has no logo, and the digest logs a warning.
 
 ## Claude tasting notes and menu enrichment
 
