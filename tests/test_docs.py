@@ -229,8 +229,9 @@ def test_the_stale_reference_scan_covers_the_expected_files():
 def test_no_current_doc_has_a_stale_reference(name):
     text = _text(name)
     if name == UPGRADE_PAGE:
-        # Only the upgrade page may tell a v3 user to remove the old variable.
-        text = re.sub("HA_SSH_TARGET", "", text, flags=re.I)
+        # Only the upgrade page may tell a v3 user to remove the old variables.
+        for old in REMOVED_VARS | OLD_HEALTHCHECK_VARS:
+            text = re.sub(rf"\b{old}\b", "", text, flags=re.I)
 
     assert STALE.findall(text) == []
 
@@ -239,6 +240,12 @@ def test_the_upgrade_page_still_names_the_removed_variable():
     # A v3 user must see which old variable to remove. Delete this test only
     # with the SSH text.
     assert "HA_SSH_TARGET" in _text(UPGRADE_PAGE)
+
+
+@pytest.mark.parametrize("old", sorted(REMOVED_VARS | OLD_HEALTHCHECK_VARS))
+def test_the_upgrade_page_names_each_removed_variable(old):
+    # The release notes link to the upgrade page for these names.
+    assert re.search(rf"\b{old}\b", _text(UPGRADE_PAGE)), old
 
 
 def test_the_docker_quick_start_needs_no_checkout():
