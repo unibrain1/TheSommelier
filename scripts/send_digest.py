@@ -8,6 +8,14 @@ SMTP with STARTTLS. Idempotent: tracks last-sent date in the data folder
 Usage: send_digest.py [--dry-run] [--force]
   --dry-run  Print the email subject and recipient list without sending
   --force    Send even if digest has no content or already sent today
+
+Exit codes:
+  0  Sent, or nothing to do (not configured, nothing to send, already sent).
+     With --dry-run, the script goes on when the digest is not configured
+  1  Send failure, missing digest file, settings that are not valid, or a
+     crash
+  3  digest.json is not for today, and --force is not set. The last sync did
+     not finish, or it did not make a new digest
 """
 
 import json
@@ -124,10 +132,11 @@ def main() -> None:
     today_str = _today_local()
     if digest.get("date") != today_str and not force:
         print(
-            f"Digest is for {digest.get('date')}, not today ({today_str}). "
-            "Use --force to override."
+            f"ERROR: Digest is for {digest.get('date')}, not today ({today_str}). "
+            "Use --force to override.",
+            file=sys.stderr,
         )
-        return
+        sys.exit(3)
 
     # Check if there's content worth sending
     if not digest.get("has_content") and not force:

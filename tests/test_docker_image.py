@@ -354,6 +354,49 @@ def test_check_warns_op_service_account_token_in_the_container(running):
     assert "WARNING: OP_SERVICE_ACCOUNT_TOKEN is set." in result.stderr
 
 
+@pytest.fixture
+def held_sync_lock(running):
+    """Hold /tmp/sync.lock in the container with the real flock, as a sync does."""
+    name, _ = running
+    # A short sleep, so a holder that is left behind ends on its own. The image
+    # has no pkill, so the holder writes its PID for the teardown.
+    _docker(
+        "exec",
+        "-d",
+        name,
+        "flock",
+        "/tmp/sync.lock",
+        "bash",
+        "-c",
+        "echo $$ > /tmp/sync-holder.pid; exec sleep 47",
+    )
+    try:
+        for _ in range(30):
+            # Exit 1 means that the lock is taken. Exit 0 means that it is free.
+            probe = _exec(name, "flock", "-n", "/tmp/sync.lock", "true")
+            if probe.returncode == 1:
+                break
+            time.sleep(0.5)
+        else:
+            pytest.fail("the background flock never took /tmp/sync.lock")
+        yield name
+    finally:
+        _exec(
+            name, "bash", "-c", 'kill "$(cat /tmp/sync-holder.pid)" 2>/dev/null || true'
+        )
+
+
+def test_sync_sh_skips_a_run_while_another_sync_holds_the_lock(held_sync_lock):
+    name = held_sync_lock
+
+    result = _exec(name, "bash", "/app/sync.sh")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Skipping sync: another sync holds /tmp/sync.lock" in result.stdout
+    # The run stopped at the lock: fetch_docker.sh did not start.
+    assert "Checking settings" not in result.stdout + result.stderr
+
+
 def test_notes_generate_in_the_image(sandbox):
     """The allow list must leave the CLI all it needs. Needs a real token."""
     token = os.environ.get("SOMMELIER_CLAUDE_TEST_TOKEN", "")

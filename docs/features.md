@@ -10,6 +10,8 @@ Each section lists what the feature does, how to turn it on, and its keys. The f
 
 The sync runs at the times in `SYNC_SCHEDULE`. The digest email has its own schedule. All cron times use `TZ`. The menu dates and the digest day always use Pacific time.
 
+A scheduled sync that starts while another sync runs is skipped. The log shows `Skipping sync: another sync holds /tmp/sync.lock`, and the skipped run sends no ping.
+
 To change a schedule, remove the `# ` from its line in `compose.yaml` and edit the value. All three keys are plain values.
 
 | Key | Default |
@@ -122,6 +124,20 @@ The check schedule on Healthchecks.io must match `SYNC_SCHEDULE`. If it does not
 - Grace time: 45 minutes
 
 Healthchecks.io accepts only one cron expression. The 22:00 run sends one extra ping, which has no effect. If you change `SYNC_SCHEDULE`, change the check schedule in the same change.
+
+The success ping body starts with `Pipeline completed successfully.` It has the `Bottles`, `Weeks planned` and `Time` lines. It has a line `Warnings: N`, where N is the number of warnings in the run.
+
+The sync counts a warning when an optional step fails. Examples are community notes, tasting notes, menu enrichment, the Home Assistant JSON files and digest generation. The sync also counts each `WARNING:` line of the settings check. An example is a feature that is off because some of its settings are missing or not valid. A feature with no settings at all adds no warning.
+
+If N is greater than 0, the ping lists each warning line below the count. The warning lines hold no secret values.
+
+When some weeks get no tasting note, the log names those weeks, and the run counts a warning. When no note is made, the note step fails, the run counts a warning, and the sync publishes the plan with empty notes.
+
+A failed run sends the body `Pipeline failed at step: <step>. Check container logs for details.` The step name is one of a fixed set, such as `settings`, `fetch`, `parse`, `plan`, `compare`, `pairing` or `publish`. The body holds no secret.
+
+The scheduled digest send (`DIGEST_SEND_SCHEDULE`) also pings `HEALTHCHECK_URL`. It sends a fail ping with the cause when the send fails. It also sends a fail ping when `digest.json` is stale. The file is stale when it is not for today. Then the last sync did not finish, or it did not make a new digest. Healthchecks.io then sends its alert. The next successful sync sends a success ping, and the check returns to up.
+
+A manual run with `--dry-run` or `--force` sends no ping. So does a digest run that reports "Nothing to send", "already sent" or "not configured".
 
 ## Container health check
 

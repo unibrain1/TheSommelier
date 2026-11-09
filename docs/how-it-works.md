@@ -13,7 +13,7 @@ Each sync runs these steps:
 5. Publish the complete plan to the site.
 6. If Home Assistant is on (`HA_ENABLED=true`), write `thisweek.json` and `today.json` for its sensors. If it is off, remove them.
 7. Write the morning digest files. The digest email goes out on its own schedule (`DIGEST_SEND_SCHEDULE`), if the digest feature is on.
-8. If `HEALTHCHECK_URL` is set, ping Healthchecks.io: a success ping at the end, or a fail ping when a step stops the sync.
+8. If `HEALTHCHECK_URL` is set, ping Healthchecks.io. The success ping shows the warning count. The fail ping names the step that stopped the sync.
 
 The sync builds the plan again from scratch each time. CellarTracker is the source of all wine data. Claude writes the tasting notes. The rules do the rest, so the same cellar on the same day gives the same plan, apart from the Claude notes.
 

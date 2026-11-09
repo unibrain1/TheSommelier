@@ -14,7 +14,7 @@ external services and publishes a static web page.
 
 | Area | Files | Risk |
 | --- | --- | --- |
-| Shell | `pipeline.sh`, `fetch.sh`, `fetch_docker.sh`, `entrypoint.sh`, `send_digest.sh` | Secrets, quoting, error handling |
+| Shell | `pipeline.sh`, `fetch.sh`, `fetch_docker.sh`, `sync.sh`, `entrypoint.sh`, `send_digest.sh` | Secrets, quoting, error handling |
 | External data | `curl` calls in `pipeline.sh`, `scripts/fetch_community_notes.py` | Untrusted input from CellarTracker, Google Calendar and RSS |
 | Settings and secrets | `scripts/settings.py`, `scripts/healthcheck.py` | Secrets in logs and errors, the Healthchecks key in a URL |
 | LLM calls | `scripts/wine_utils.py` (`claude` CLI), `scripts/generate_notes.py`, `scripts/enrich_menu.py` | Prompt injection from menu text and wine notes |

@@ -115,3 +115,8 @@ def test_call_claude_without_cli_gives_empty_result(clean_env, capsys):
     err = capsys.readouterr().err
     assert "WARNING: Claude CLI could not start" in err
     assert "claude-canary" in err
+
+
+def test_extract_json_warns_when_the_reply_has_no_json_object(capsys):
+    assert wine_utils.extract_json("Sorry, I cannot help with that.") == {}
+    assert "WARNING: Claude response has no JSON object" in capsys.readouterr().err
