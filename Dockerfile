@@ -21,7 +21,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --root-user-action=ignore -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-# Create ansible user (matches host UID/GID)
+# A named user for UID 1000, the UID that the compose files and the docs use for the volumes
 RUN groupadd -g 1000 ansible && useradd -u 1000 -g 1000 -m ansible
 
 # HOME=/tmp because the root file system is read-only at run time. The Claude CLI writes its config there.
@@ -37,7 +37,7 @@ COPY . /app
 # A new named volume copies the owner of /data on first use, so the volume is writable with no init step.
 RUN mkdir -p /data/site /config && chown 1000:1000 /data /data/site
 
-# Numeric form of the ansible user created above, so the host can resolve it (DL3066)
+# Numeric form of the user above, so the host can resolve it (DL3066)
 USER 1000:1000
 
 EXPOSE 8080

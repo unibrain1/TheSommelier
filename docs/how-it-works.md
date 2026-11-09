@@ -12,7 +12,7 @@ Each sync runs these steps:
 4. Compare the plan with your inventory. If the menu feature is on, suggest a pairing for each meal.
 5. Publish the complete plan to the site.
 
-The sync builds the plan again from scratch each time. CellarTracker is the source of all wine data. Claude writes the tasting notes. The rules do the rest, so the same cellar always gives the same plan.
+The sync builds the plan again from scratch each time. CellarTracker is the source of all wine data. Claude writes the tasting notes. The rules do the rest, so the same cellar on the same day gives the same plan, apart from the Claude notes.
 
 ## How wines are prioritized
 

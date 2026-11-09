@@ -20,6 +20,9 @@ OLD_HEALTHCHECK_VARS = {
     "HEALTHCHECK_BASE_URL",
     "HEALTHCHECK_ENABLED",
 }
+# The removed variables that a v3 release read. The others came and went
+# inside the v4.0.0 milestone, so no v3 .env holds them.
+V3_VARS = {"HA_SSH_TARGET", "HEALTHCHECK_PING_KEY"}
 # Scripts read these outside settings.py, which does not own them.
 SHELL_VARS = {"SYNC_SCHEDULE", "DIGEST_SEND_SCHEDULE", "TZ"}
 UPPER_NAME = re.compile(r"""["']([A-Z][A-Z0-9_]{2,})["']""")
@@ -230,7 +233,7 @@ def test_no_current_doc_has_a_stale_reference(name):
     text = _text(name)
     if name == UPGRADE_PAGE:
         # Only the upgrade page may tell a v3 user to remove the old variables.
-        for old in REMOVED_VARS | OLD_HEALTHCHECK_VARS:
+        for old in V3_VARS:
             text = re.sub(rf"\b{old}\b", "", text, flags=re.I)
 
     assert STALE.findall(text) == []
@@ -242,7 +245,7 @@ def test_the_upgrade_page_still_names_the_removed_variable():
     assert "HA_SSH_TARGET" in _text(UPGRADE_PAGE)
 
 
-@pytest.mark.parametrize("old", sorted(REMOVED_VARS | OLD_HEALTHCHECK_VARS))
+@pytest.mark.parametrize("old", sorted(V3_VARS))
 def test_the_upgrade_page_names_each_removed_variable(old):
     # The release notes link to the upgrade page for these names.
     assert re.search(rf"\b{old}\b", _text(UPGRADE_PAGE)), old
