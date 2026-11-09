@@ -23,23 +23,14 @@ nginx
 
 # Set up periodic sync with supercronic (runs as non-root)
 # SYNC_SCHEDULE can hold more than one cron expression, separated by ";".
+# DIGEST_SEND_SCHEDULE holds one.
 # Cron expressions contain spaces and commas, so neither can be the separator.
-# One expression cannot give "every 30 min from 06:00 to 22:00" with the 22:00 run included.
-DEFAULT_SCHEDULE="*/30 6-21 * * *;0 22 * * *"
-SCHEDULE="${SYNC_SCHEDULE:-${DEFAULT_SCHEDULE}}"
-DIGEST_SCHEDULE="${DIGEST_SEND_SCHEDULE:-0 8 * * *}"
-# A blank entry (for example "a;;b" or " ") gives a crontab line with no schedule,
-# and supercronic then rejects the whole file, digest line included.
-SYNC_EXPRS=()
-IFS=';' read -ra RAW_EXPRS <<< "${SCHEDULE}"
-for expr in "${RAW_EXPRS[@]}"; do
-  [[ -n "${expr// /}" ]] && SYNC_EXPRS+=("${expr}")
-done
-if [[ ${#SYNC_EXPRS[@]} -eq 0 ]]; then
-  echo "WARNING: SYNC_SCHEDULE has no cron expression — using default '${DEFAULT_SCHEDULE}'" >&2
-  SCHEDULE="${DEFAULT_SCHEDULE}"
-  IFS=';' read -ra SYNC_EXPRS <<< "${SCHEDULE}"
-fi
+# settings.py owns the defaults. It stops the start on a value with a newline,
+# because each line of the crontab is a command that supercronic runs. It also
+# removes each blank entry, so each entry below is a cron expression.
+SCHEDULE=$(python3 /app/scripts/settings.py get sync_schedule) || exit 1
+DIGEST_SCHEDULE=$(python3 /app/scripts/settings.py get digest_schedule) || exit 1
+IFS=';' read -ra SYNC_EXPRS <<< "${SCHEDULE}"
 # supercronic does not overlap runs of one job, but the initial sync below is
 # not a supercronic job. The shared lock stops a scheduled run that starts
 # during the initial sync. A run that cannot get the lock is skipped.
@@ -50,6 +41,9 @@ printf '%s cd /app && flock -n -o '"${SYNC_LOCK}"' bash fetch_docker.sh\n' "${SY
 echo "${DIGEST_SCHEDULE} cd /app && bash send_digest.sh" >> /tmp/crontab
 echo "    Scheduled sync: ${SCHEDULE}"
 echo "    Scheduled digest: ${DIGEST_SCHEDULE}"
+# supercronic runs in the background, so a bad line would stop every job with
+# no sign here. -test checks the cron expressions before the start.
+supercronic -test /tmp/crontab || { echo "ERROR: The crontab is not valid. Check SYNC_SCHEDULE and DIGEST_SEND_SCHEDULE." >&2; exit 1; }
 supercronic /tmp/crontab &
 
 # Run the pipeline once (site is already serving)

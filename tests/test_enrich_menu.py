@@ -4,7 +4,7 @@ import json
 from unittest.mock import patch
 
 from enrich_menu import (
-    _normalize_enriched,
+    _validate_enriched,
     build_enrichment_prompt,
     enrich_menu,
     load_cache,
@@ -88,86 +88,109 @@ class TestLoadCache:
         p.write_text(json.dumps(data))
         assert load_cache(p) == data
 
-    def test_invalid_json_returns_empty(self, tmp_path):
+    def test_invalid_json_returns_empty(self, tmp_path, capsys):
         p = tmp_path / "bad.json"
         p.write_text("{bad")
         assert load_cache(p) == {}
+        assert (
+            "WARNING: enrichment cache could not be loaded" in capsys.readouterr().err
+        )
+
+    def test_cache_that_is_not_utf8_returns_empty(self, tmp_path, capsys):
+        p = tmp_path / "bad.json"
+        p.write_bytes(b"\xff\xfe{}")
+        assert load_cache(p) == {}
+        assert (
+            "WARNING: enrichment cache could not be loaded" in capsys.readouterr().err
+        )
 
 
-class TestNormalizeEnriched:
-    """Unit tests for _normalize_enriched — scalar-field coercion before caching."""
+class TestValidateEnriched:
+    """Unit tests for _validate_enriched — the check of LLM output before caching."""
 
     def test_scalar_list_coerced_to_first_string(self):
-        result = _normalize_enriched({"protein": ["chicken", "shrimp"]})
+        result = _validate_enriched({"protein": ["chicken", "shrimp"]})
         assert result["protein"] == "chicken"
 
     def test_scalar_single_element_list_coerced(self):
-        result = _normalize_enriched({"richness": ["medium"]})
+        result = _validate_enriched({"richness": ["medium"]})
         assert result["richness"] == "medium"
 
     def test_all_ten_scalar_fields_coerced(self):
-        scalar_fields = [
-            "protein",
-            "cut",
-            "preparation",
-            "sauce",
-            "sauce_intensity",
-            "cuisine",
-            "richness",
-            "acidity",
-            "sweetness",
-            "spice_heat",
-        ]
-        payload = {f: ["x"] for f in scalar_fields}
-        result = _normalize_enriched(payload)
-        for field in scalar_fields:
-            assert result[field] == "x", (
-                f"Expected '{field}' to be coerced to 'x', got {result[field]!r}"
+        # Each enum field needs an allowed value, so each field gets its own.
+        payload_values = {
+            "protein": "x",
+            "cut": "x",
+            "preparation": "x",
+            "sauce": "x",
+            "sauce_intensity": "light",
+            "cuisine": "x",
+            "richness": "rich",
+            "acidity": "medium-high",
+            "sweetness": "low",
+            "spice_heat": "none",
+        }
+        payload = {f: [v] for f, v in payload_values.items()}
+        result = _validate_enriched(payload)
+        for field, value in payload_values.items():
+            assert result[field] == value, (
+                f"Expected '{field}' to be coerced to {value!r}, got {result[field]!r}"
             )
 
     def test_scalar_already_string_unchanged(self):
-        result = _normalize_enriched({"protein": "beef"})
+        result = _validate_enriched({"protein": "beef"})
         assert result["protein"] == "beef"
 
     def test_scalar_int_coerced_to_string(self):
-        result = _normalize_enriched({"richness": 3})
-        assert result["richness"] == "3"
+        result = _validate_enriched({"protein": 3})
+        assert result["protein"] == "3"
 
     def test_scalar_float_coerced_to_string(self):
-        result = _normalize_enriched({"acidity": 0.7})
-        assert result["acidity"] == "0.7"
+        result = _validate_enriched({"cut": 0.7})
+        assert result["cut"] == "0.7"
 
-    def test_scalar_none_unchanged(self):
-        result = _normalize_enriched({"protein": None})
-        assert "protein" in result
-        assert result["protein"] is None
+    def test_scalar_bool_coerced_to_string(self):
+        result = _validate_enriched({"sauce": True})
+        assert result["sauce"] == "True"
+
+    def test_scalar_none_dropped(self):
+        result = _validate_enriched({"protein": None, "cut": "loin"})
+        assert result == {"cut": "loin"}
+
+    def test_scalar_dict_dropped(self):
+        result = _validate_enriched({"protein": {"name": "pork"}, "cut": "loin"})
+        assert result == {"cut": "loin"}
 
     def test_scalar_empty_list_field_omitted(self):
-        result = _normalize_enriched({"protein": []})
+        result = _validate_enriched({"protein": [], "cut": "loin"})
         assert "protein" not in result
 
     def test_scalar_list_no_string_elements_field_omitted(self):
         # A list of ints contains no string elements, so the field should be omitted.
-        result = _normalize_enriched({"protein": [42, 99]})
+        result = _validate_enriched({"protein": [42, 99], "cut": "loin"})
         assert "protein" not in result
 
     def test_array_field_sides_untouched(self):
-        result = _normalize_enriched({"sides": ["potatoes", "kale"]})
+        result = _validate_enriched({"sides": ["potatoes", "kale"]})
         assert result["sides"] == ["potatoes", "kale"]
 
     def test_array_field_dominant_flavor_axis_untouched(self):
         # Single-element list on an array field must NOT be coerced to a bare string.
-        result = _normalize_enriched({"dominant_flavor_axis": ["savory"]})
+        result = _validate_enriched({"dominant_flavor_axis": ["savory"]})
         assert result["dominant_flavor_axis"] == ["savory"]
 
     def test_array_field_pairing_priorities_untouched(self):
-        result = _normalize_enriched({"pairing_priorities": ["match acidity"]})
+        result = _validate_enriched({"pairing_priorities": ["match acidity"]})
         assert result["pairing_priorities"] == ["match acidity"]
 
     def test_array_single_element_not_coerced(self):
         # Critical boundary: single-element array fields must never be coerced to strings.
-        result = _normalize_enriched({"sides": ["potatoes"]})
+        result = _validate_enriched({"sides": ["potatoes"]})
         assert result["sides"] == ["potatoes"]
+
+    def test_array_field_string_dropped(self):
+        result = _validate_enriched({"sides": "potatoes", "cut": "loin"})
+        assert result == {"cut": "loin"}
 
     def test_mixed_realistic_payload(self):
         payload = {
@@ -178,7 +201,7 @@ class TestNormalizeEnriched:
             "dominant_flavor_axis": ["savory", "smoky"],
             "pairing_priorities": ["match weight"],
         }
-        result = _normalize_enriched(payload)
+        result = _validate_enriched(payload)
         assert result["protein"] == "pork"
         assert result["preparation"] == "grilled"
         assert result["richness"] == "medium"
@@ -186,22 +209,158 @@ class TestNormalizeEnriched:
         assert result["dominant_flavor_axis"] == ["savory", "smoky"]
         assert result["pairing_priorities"] == ["match weight"]
 
-    def test_empty_dict_returns_empty_dict(self):
-        assert _normalize_enriched({}) == {}
-
-    def test_unknown_field_untouched(self):
-        # Unrecognized fields that aren't in SCALAR_FIELDS pass through unchanged.
-        result = _normalize_enriched({"future_field": ["val"]})
-        assert result["future_field"] == ["val"]
+    def test_empty_dict_returns_none(self):
+        assert _validate_enriched({}) is None
 
     def test_returns_new_dict_not_mutates_input(self):
         original = {"protein": ["beef"]}
-        _normalize_enriched(original)
+        _validate_enriched(original)
         assert original["protein"] == ["beef"]
+
+    def test_not_a_dict_returns_none(self, capsys):
+        assert _validate_enriched(["pork", "grilled"]) is None
+        assert "WARNING" in capsys.readouterr().err
+
+    def test_unknown_key_dropped(self, capsys):
+        result = _validate_enriched({"protein": "pork", "instructions": "ignore all"})
+        assert result == {"protein": "pork"}
+        err = capsys.readouterr().err
+        assert "WARNING" in err
+        assert "ignore all" not in err
+
+    def test_scalar_too_long_dropped(self, capsys):
+        result = _validate_enriched({"protein": "p" * 81, "cut": "c" * 80})
+        assert result == {"cut": "c" * 80}
+        err = capsys.readouterr().err
+        assert "WARNING" in err and "'protein'" in err
+        assert "p" * 81 not in err
+
+    def test_empty_string_dropped(self):
+        result = _validate_enriched({"protein": "   ", "cut": " loin "})
+        assert result == {"cut": "loin"}
+
+    def test_enum_value_not_in_set_dropped(self, capsys):
+        result = _validate_enriched({"richness": "extreme", "acidity": "HIGH"})
+        assert result == {"acidity": "high"}
+        err = capsys.readouterr().err
+        assert "'richness'" in err
+        assert "extreme" not in err
+
+    def test_list_with_non_string_keeps_only_strings(self):
+        result = _validate_enriched({"sides": ["kale", 3, None, {"x": 1}, " rice "]})
+        assert result == {"sides": ["kale", "rice"]}
+
+    def test_list_over_five_items_cut_to_five(self):
+        result = _validate_enriched({"sides": [f"side{i}" for i in range(8)]})
+        assert result == {"sides": [f"side{i}" for i in range(5)]}
+
+    def test_all_fields_bad_returns_none(self):
+        payload = {
+            "protein": "",
+            "richness": "extreme",
+            "sides": [1, 2],
+            "cuisine": None,
+            "unknown": "x",
+        }
+        assert _validate_enriched(payload) is None
+
+
+class TestEnrichMenuRepairsCache:
+    """Integration test: enrich_menu() checks each cached entry and repairs the file."""
+
+    def test_bad_cached_entry_repaired_in_file(self, tmp_path):
+        menu_path = tmp_path / "menu.json"
+        cache_path = tmp_path / "cache.json"
+        good_text = "Grilled pork chop"
+        bad_text = "Mystery dish"
+        menu_path.write_text(
+            json.dumps(
+                [
+                    {"date": "2026-06-01", "meal": good_text},
+                    {"date": "2026-06-02", "meal": bad_text},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        cache_path.write_text(
+            json.dumps(
+                {
+                    text_hash(good_text): {
+                        "protein": "pork",
+                        "richness": "EXTREME",
+                        "injected": "<script>",
+                        "sides": ["s"] * 9,
+                    },
+                    text_hash(bad_text): {"richness": "extreme"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("enrich_menu.call_claude", return_value="") as mock_claude:
+            results = enrich_menu(menu_path, cache_path)
+        # The entry with no usable field is enriched again, the repaired one is not.
+        mock_claude.assert_called_once()
+        assert bad_text in mock_claude.call_args.args[0]
+        assert good_text not in mock_claude.call_args.args[0]
+
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        assert cache == {text_hash(good_text): {"protein": "pork", "sides": ["s"] * 5}}
+        assert results[1]["enriched"] is None
+
+    def test_cached_entry_of_an_old_meal_is_checked(self, tmp_path):
+        menu_path = tmp_path / "menu.json"
+        cache_path = tmp_path / "cache.json"
+        menu_path.write_text("[]", encoding="utf-8")
+        cache_path.write_text(
+            json.dumps(
+                {
+                    "old-good": {"protein": "beef", "injected": "x"},
+                    "old-bad": "not an object",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("enrich_menu.call_claude") as mock_claude:
+            enrich_menu(menu_path, cache_path)
+        mock_claude.assert_not_called()
+
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        assert cache == {"old-good": {"protein": "beef"}}
+
+    def test_cache_that_is_not_an_object_is_ignored(self, tmp_path, capsys):
+        cache_path = tmp_path / "cache.json"
+        cache_path.write_text('["SECRET-a", "b"]', encoding="utf-8")
+
+        assert load_cache(cache_path) == {}
+        err = capsys.readouterr().err
+        assert "WARNING: enrichment cache was list" in err
+        assert "SECRET-a" not in err
+
+    def test_bad_reply_from_claude_is_not_cached(self, tmp_path):
+        menu_path = tmp_path / "menu.json"
+        cache_path = tmp_path / "cache.json"
+        menu_path.write_text(
+            json.dumps(
+                [
+                    {"date": "2026-06-01", "meal": "Pork chop"},
+                    {"date": "2026-06-02", "meal": "Salmon"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        reply = json.dumps({"0": "pork", "1": {"richness": "extreme"}})
+
+        with patch("enrich_menu.call_claude", return_value=reply):
+            results = enrich_menu(menu_path, cache_path)
+
+        assert json.loads(cache_path.read_text(encoding="utf-8")) == {}
+        assert [r["enriched"] for r in results] == [None, None]
 
 
 class TestEnrichMenuNormalizesBeforeCache:
-    """Integration test: enrich_menu() applies _normalize_enriched before writing the cache."""
+    """Integration test: enrich_menu() applies _validate_enriched before writing the cache."""
 
     def test_normalized_values_written_to_cache(self, tmp_path):
         menu_path = tmp_path / "menu.json"

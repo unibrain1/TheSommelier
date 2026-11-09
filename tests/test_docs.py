@@ -12,7 +12,10 @@ import settings
 REPO = Path(__file__).resolve().parent.parent
 
 # settings.py names these only to warn a host that still sets them.
-REMOVED_VARS = {"HA_SSH_TARGET", *settings.REMOVED_FLAGS}
+REMOVED_VARS = {"HA_SSH_TARGET", settings.UNUSED_OP_VAR, *settings.REMOVED_FLAGS}
+# settings.py names these to pass them to the claude CLI. They are not settings
+# of this app, so the docs and the samples do not list them.
+CLAUDE_ENV_PASS = {*settings.CLAUDE_ENV_NAMES, *settings.CLAUDE_ENV_PREFIXES}
 # HEALTHCHECK_URL replaced these. settings.py ignores them and does not name them.
 OLD_HEALTHCHECK_VARS = {
     "HEALTHCHECK_PING_KEY",
@@ -22,9 +25,9 @@ OLD_HEALTHCHECK_VARS = {
 }
 # The removed variables that a v3 release read. The others came and went
 # inside the v4.0.0 milestone, so no v3 .env holds them.
-V3_VARS = {"HA_SSH_TARGET", "HEALTHCHECK_PING_KEY"}
+V3_VARS = {"HA_SSH_TARGET", "HEALTHCHECK_PING_KEY", settings.UNUSED_OP_VAR}
 # Scripts read these outside settings.py, which does not own them.
-SHELL_VARS = {"SYNC_SCHEDULE", "DIGEST_SEND_SCHEDULE", "TZ"}
+SHELL_VARS = {"TZ"}
 UPPER_NAME = re.compile(r"""["']([A-Z][A-Z0-9_]{2,})["']""")
 
 SAMPLES = (
@@ -93,7 +96,7 @@ def _section(text: str, heading: str) -> str:
 
 def _code_env_names() -> set[str]:
     names = set(UPPER_NAME.findall(_text("scripts/settings.py")))
-    return (names - REMOVED_VARS) | SHELL_VARS
+    return (names - REMOVED_VARS - CLAUDE_ENV_PASS) | SHELL_VARS
 
 
 def _user_settings() -> set[str]:

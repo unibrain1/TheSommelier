@@ -1,8 +1,8 @@
 """Run the real shell pipeline against a fake `curl`. No network, no `claude`.
 
 Each test copies the shell scripts and `scripts/` into `tmp_path/app`, so the
-real `data/` and `site/` folders stay as they are. The fake `curl` copies a
-fixture file and logs each URL. A local HTTP server stands in for
+real `data/` and `site/` folders stay as they are. The fake `curl` reads its
+config on stdin, copies a fixture file, and logs each URL and its argv. A local HTTP server stands in for
 Healthchecks.io and for the community notes feed (that script uses urllib,
 not curl).
 """
@@ -43,32 +43,119 @@ BOTTLE_COPIES = 14
 BOTTLES = 6 * BOTTLE_COPIES
 ICS_URL = "https://calendar.example.test/private/menu.ics"
 
-# Reads -o and the URL like the real call does, logs the URL, and copies the
-# fixture. A missing fixture is an HTTP error for `curl -f`: exit 22. Without
-# -g, real curl reads [] and {} as a glob and fails a URL with them: exit 3.
-FAKE_CURL = """#!/usr/bin/env bash
-out=""
-url=""
-globoff=0
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -o) out="$2"; shift 2 ;;
-    -*g*) globoff=1; shift ;;
-    -*) shift ;;
-    *) url="$1"; shift ;;
-  esac
-done
-echo "${url}" >> "${FAKE_CURL_LOG}"
-[[ ${globoff} -eq 1 || "${url}" != *[\\[\\]\\{\\}]* ]] || exit 3
-case "${url}" in
-  *Table=Inventory*) name=inventory.tsv ;;
-  *Table=Notes*) name=notes.tsv ;;
-  *Table=FoodTags*) name=foodtags.tsv ;;
-  *Table=Consumed*) name=consumed.tsv ;;
-  *) name=menu.ics ;;
-esac
-[[ -f "${FAKE_CURL_FIXTURES}/${name}" ]] || exit 22
-cp "${FAKE_CURL_FIXTURES}/${name}" "${out}"
+# Reads the config on stdin (`-K -`) like real curl, logs its argv and the
+# URL it would send, and copies the fixture. The URL is `url?data&data...` in
+# config order, with each data-urlencode value encoded as curl 8 does it
+# (space as `+`, lowercase hex). With no --connect-timeout or --max-time it
+# exits 28, the curl timeout code, so each run also checks the timeouts. A
+# missing fixture is an HTTP error for `curl -f`: exit 22. Without globoff,
+# real curl reads [] and {} as a glob and fails a URL with them: exit 3.
+FAKE_CURL = r"""#!/usr/bin/env python3
+import os, re, shutil, sys
+
+UNRESERVED = re.compile(r"[A-Za-z0-9._~-]")
+
+
+def encode(text):
+    out = []
+    for byte in text.encode("utf-8"):
+        char = chr(byte)
+        if UNRESERVED.fullmatch(char):
+            out.append(char)
+        elif char == " ":
+            out.append("+")
+        else:
+            out.append("%%%02x" % byte)
+    return "".join(out)
+
+
+def config_value(raw):
+    if not raw.startswith('"'):
+        return raw.split()[0] if raw.split() else ""
+    escapes = {"t": "\t", "n": "\n", "r": "\r", "v": "\v"}
+    out, i = [], 1
+    while i < len(raw) and raw[i] != '"':
+        if raw[i] == "\\" and i + 1 < len(raw):
+            i += 1
+            out.append(escapes.get(raw[i], raw[i]))
+        else:
+            out.append(raw[i])
+        i += 1
+    return "".join(out)
+
+
+args = sys.argv[1:]
+with open(os.environ["FAKE_CURL_ARGV_LOG"], "a") as log:
+    log.write(" ".join(args) + "\n")
+
+out, url, get, globoff, timeouts, data = "", "", False, False, set(), []
+lines = []
+i = 0
+while i < len(args):
+    arg = args[i]
+    if arg == "-o":
+        out, i = args[i + 1], i + 2
+        continue
+    if arg == "-K":
+        if args[i + 1] != "-":
+            sys.exit(2)
+        # curl ends a config line only at \n. splitlines() also splits at
+        # U+2028 and other characters that real curl keeps in the value.
+        lines = sys.stdin.read().split("\n")
+        i += 2
+        continue
+    if arg in ("--connect-timeout", "--max-time"):
+        timeouts.add(arg)
+        i += 2
+        continue
+    if not arg.startswith("-"):
+        url = arg
+    i += 1
+
+for line in lines:
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    match = re.match(r"(?:--)?([A-Za-z-]+)\s*[=:]?\s*(.*)$", line)
+    if match is None:
+        sys.exit(2)
+    key, value = match.group(1), config_value(match.group(2))
+    if key == "url":
+        url = value
+    elif key == "get":
+        get = True
+    elif key == "globoff":
+        globoff = True
+    elif key == "data":
+        data.append(value)
+    elif key == "data-urlencode":
+        name, sep, content = value.partition("=")
+        if not sep:
+            sys.exit(2)
+        data.append(name + "=" + encode(content))
+    else:
+        sys.exit(2)
+
+if data:
+    if not get:
+        sys.exit(2)
+    url = url + "?" + "&".join(data)
+with open(os.environ["FAKE_CURL_LOG"], "a") as log:
+    log.write(url + "\n")
+
+if timeouts != {"--connect-timeout", "--max-time"}:
+    sys.exit(28)
+if not globoff and re.search(r"[\[\]{}]", url):
+    sys.exit(3)
+name = "menu.ics"
+for table, fixture in (("Inventory", "inventory.tsv"), ("Notes", "notes.tsv"),
+                       ("FoodTags", "foodtags.tsv"), ("Consumed", "consumed.tsv")):
+    if "Table=" + table in url:
+        name = fixture
+source = os.path.join(os.environ["FAKE_CURL_FIXTURES"], name)
+if not os.path.isfile(source):
+    sys.exit(22)
+shutil.copy(source, out)
 """
 
 
@@ -123,6 +210,7 @@ class Harness:
     app: Path
     fixtures: Path
     curl_log: Path
+    curl_argv_log: Path
     path: str
     server: LocalServer
     env: dict[str, str] = field(default_factory=dict)
@@ -131,6 +219,11 @@ class Harness:
         if not self.curl_log.exists():
             return []
         return self.curl_log.read_text().splitlines()
+
+    def curl_argvs(self) -> list[str]:
+        if not self.curl_argv_log.exists():
+            return []
+        return self.curl_argv_log.read_text().splitlines()
 
     def run(
         self,
@@ -221,11 +314,13 @@ def harness(tmp_path, server) -> Harness:
         pytest.skip("a claude CLI is on the test PATH, the tests need none")
 
     curl_log = tmp_path / "curl.log"
+    curl_argv_log = tmp_path / "curl_argv.log"
     env = {
         "PATH": path,
         "HOME": str(tmp_path / "home"),
         "PYTHONDONTWRITEBYTECODE": "1",
         "FAKE_CURL_LOG": str(curl_log),
+        "FAKE_CURL_ARGV_LOG": str(curl_argv_log),
         "FAKE_CURL_FIXTURES": str(fixtures),
         "USERNAME": FAKE_USER,
         "PASSWORD": FAKE_PASSWORD,
@@ -234,7 +329,7 @@ def harness(tmp_path, server) -> Harness:
         "SITE_DIR": str(tmp_path / "run" / "data" / "site"),
         "CONFIG_DIR": str(app / "config"),
     }
-    return Harness(tmp_path, app, fixtures, curl_log, path, server, env)
+    return Harness(tmp_path, app, fixtures, curl_log, curl_argv_log, path, server, env)
 
 
 def _output(result: subprocess.CompletedProcess) -> str:
@@ -1005,7 +1100,7 @@ def test_pipeline_menu_off_removes_files_of_an_earlier_run(harness):
 
 
 def test_pipeline_menu_url_with_brackets_is_fetched_as_is(harness):
-    # Without -g, curl reads [] as a glob and fails the fetch.
+    # Without globoff, curl reads [] as a glob and fails the fetch.
     url = "https://calendar.example.test/private/menu[1].ics"
 
     result = harness.run("fetch_docker.sh", extra={"GOOGLE_CALENDAR_ICS_URL": url})
@@ -1080,3 +1175,56 @@ def test_pipeline_menu_off_digest_is_nothing_to_send(harness):
     assert "Digest generation failed" not in result.stdout
     assert (site / "digest.json").is_file()
     assert (site / "digest.html").is_file()
+
+
+def test_credentials_are_not_in_curl_argv(harness):
+    # Another process can read an argv with `ps`. The secrets go on stdin.
+    result = harness.run("fetch_docker.sh")
+
+    assert result.returncode == 0, _output(result)
+    argvs = harness.curl_argvs()
+    assert len(argvs) == 5, argvs
+    for argv in argvs:
+        for secret in (FAKE_PASSWORD, FAKE_USER, ICS_URL):
+            assert secret not in argv, argv
+        assert "-K -" in argv, argv
+
+
+def test_credentials_are_url_encoded(harness):
+    # Each character of the value must stay in the value: `&` must not start
+    # a new parameter, and `"` and `\\` must not break the config quoting.
+    password = 'p&w"d\\x %+{}'
+    username = "a user"
+
+    result = harness.run(
+        "fetch_docker.sh", extra={"USERNAME": username, "PASSWORD": password}
+    )
+
+    assert result.returncode == 0, _output(result)
+    ct_urls = [u for u in harness.curl_urls() if "Table=" in u]
+    assert len(ct_urls) == 4, ct_urls
+    # curl writes lowercase hex. Compare with no case, as curl versions differ.
+    credentials = "User=a+user&Password=p%26w%22d%5cx+%25%2b%7b%7d"
+    base = "https://www.cellartracker.com/xlquery.asp?Format=tab&Table="
+    expected = {
+        f"{base}Inventory&Location=1&{credentials}".lower(),
+        f"{base}Notes&{credentials}".lower(),
+        f"{base}FoodTags&{credentials}".lower(),
+        f"{base}Consumed&{credentials}".lower(),
+    }
+    assert {u.lower() for u in ct_urls} == expected
+
+
+def test_every_curl_in_pipeline_has_timeouts():
+    text = (REPO / "pipeline.sh").read_text()
+    assert re.search(
+        r"^CURL_TIMEOUTS=\(--connect-timeout \d+ --max-time \d+\)$", text, re.MULTILINE
+    )
+    calls = [
+        line
+        for line in text.splitlines()
+        if re.search(r"\bcurl\s", line) and not line.lstrip().startswith("#")
+    ]
+    assert len(calls) == 2, calls
+    for line in calls:
+        assert '"${CURL_TIMEOUTS[@]}"' in line, line

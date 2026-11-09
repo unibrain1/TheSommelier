@@ -1,9 +1,12 @@
 # hadolint global ignore=DL3008
-FROM python:3.14-slim AS base
+# The digest is of the multi-arch index. Dependabot proposes a new digest when the tag gets a new build.
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS base
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install system packages + Node.js for Claude Code CLI
+# Install system packages + Node.js for Claude Code CLI.
+# No apt version pins (DL3008): Debian removes old versions from the mirror, so a pin
+# breaks the next build. Debian stable gets security fixes, and the base digest pins the rest.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx curl jq nodejs npm \
     && rm -rf /var/lib/apt/lists/*
@@ -11,10 +14,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code@2.1.114
 
-# Install supercronic (cron for non-root containers)
+# Install supercronic (cron for non-root containers).
+# Change both SHA-256 values together with the version. A wrong value stops the build.
+ARG SUPERCRONIC_SHA256_amd64=feefa310da569c81b99e1027b86b27b51e6ee9ab647747b49099645120cfc671
+ARG SUPERCRONIC_SHA256_arm64=f1f8585c66de020fef494dd636058f99949d108f569fef00016a1c8b9eb145b3
 RUN ARCH=$(dpkg --print-architecture) \
-    && curl -sSfL "https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-${ARCH}" \
+    && case "${ARCH}" in \
+         amd64) SHA256="${SUPERCRONIC_SHA256_amd64}" ;; \
+         arm64) SHA256="${SUPERCRONIC_SHA256_arm64}" ;; \
+         *) echo "No supercronic SHA-256 for ${ARCH}" >&2; exit 1 ;; \
+       esac \
+    && curl -sSfL --connect-timeout 15 --max-time 300 \
+       "https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-${ARCH}" \
        -o /usr/local/bin/supercronic \
+    && echo "${SHA256}  /usr/local/bin/supercronic" | sha256sum -c - \
     && chmod +x /usr/local/bin/supercronic
 
 # Install Python dependencies (copied separately for layer caching)

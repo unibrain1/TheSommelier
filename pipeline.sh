@@ -25,9 +25,27 @@ mkdir -p "${DATA_DIR}" "${SITE_DIR}"
 rm -f "${SITE_DIR}"/.thisweek.json.* "${SITE_DIR}"/.today.json.*
 
 # --- FETCH (scripted) ---
-CT_USERNAME="${USERNAME}"
-CT_PASSWORD="${PASSWORD}"
-CT_BASE="https://www.cellartracker.com/xlquery.asp?User=${CT_USERNAME}&Password=${CT_PASSWORD}&Format=tab"
+CURL_TIMEOUTS=(--connect-timeout 15 --max-time 300)
+# -S logs the cause of a failure (DNS, timeout, HTTP code). The message names
+# the host, not the query, so no secret goes into the log.
+
+# A secret goes to curl in a config on stdin, not in argv, where `ps` shows
+# it. Only builtins (printf, parameter expansion) touch it, so no child process
+# gets it as an argument. A quoted config value reads \\ and \" as escapes.
+# A line break would end the config line. settings.py check stops the run when
+# USERNAME or PASSWORD holds one. It treats a calendar URL with one as not
+# valid, so the menu is off and there is no fetch.
+curl_quote() { local v=${1//\\/\\\\}; printf '"%s"' "${v//\"/\\\"}"; }
+
+# $1 = Table value, $2 = output file, $3 = an optional extra query parameter.
+# curl URL-encodes User and Password, so a value is plain text, not encoded.
+ct_fetch() {
+  local extra=""
+  [[ -n "${3:-}" ]] && extra="data = \"$3\""$'\n'
+  printf 'url = "https://www.cellartracker.com/xlquery.asp"\nget\ndata = "Format=tab"\ndata = "Table=%s"\n%sdata-urlencode = %s\ndata-urlencode = %s\n' \
+    "$1" "${extra}" "$(curl_quote "User=${USERNAME}")" "$(curl_quote "Password=${PASSWORD}")" \
+    | curl -sSf "${CURL_TIMEOUTS[@]}" -K - -o "$2"
+}
 
 MENU_ON=0
 MENU_FETCH_LOG="" MENU_DOWNLOAD_LOG="" MENU_PARSE_LOG=""
@@ -37,21 +55,23 @@ if python3 scripts/settings.py enabled menu; then
 fi
 
 log "==> Fetching inventory, notes, food tags${MENU_FETCH_LOG}..."
-curl -sf "${CT_BASE}&Table=Inventory&Location=1" -o "${DATA_DIR}/inventory.tsv" &
+ct_fetch Inventory "${DATA_DIR}/inventory.tsv" "Location=1" &
 PID_CT=$!
 
-curl -sf "${CT_BASE}&Table=Notes" -o "${DATA_DIR}/notes.tsv" &
+ct_fetch Notes "${DATA_DIR}/notes.tsv" &
 PID_NOTES=$!
 
-curl -sf "${CT_BASE}&Table=FoodTags" -o "${DATA_DIR}/foodtags.tsv" &
+ct_fetch FoodTags "${DATA_DIR}/foodtags.tsv" &
 PID_FOOD=$!
 
-curl -sf "${CT_BASE}&Table=Consumed" -o "${DATA_DIR}/consumed.tsv" &
+ct_fetch Consumed "${DATA_DIR}/consumed.tsv" &
 PID_CONSUMED=$!
 
 if [[ ${MENU_ON} -eq 1 ]]; then
-  # -g: curl must not read {} or [] in the secret URL as a glob.
-  curl -sfg "${GOOGLE_CALENDAR_ICS_URL}" -o "${DATA_DIR}/menu.ics" &
+  # The URL is a secret, so it goes on stdin too. globoff: curl must not read
+  # {} or [] in the URL as a glob.
+  printf 'url = %s\ngloboff\n' "$(curl_quote "${GOOGLE_CALENDAR_ICS_URL}")" \
+    | curl -sSf "${CURL_TIMEOUTS[@]}" -K - -o "${DATA_DIR}/menu.ics" &
   PID_CAL=$!
 else
   # Files from an earlier run would give pairings for a menu that is gone. A

@@ -215,3 +215,38 @@ def test_nginx_writes_only_to_tmp(nginx_conf):
 
 def test_nginx_has_no_user_line(nginx_conf):
     assert not re.search(r"^\s*user\s", nginx_conf, re.M)
+
+
+def _http_block_headers(conf: str) -> dict[str, str]:
+    """Return the add_header lines of the http block, outside the server block."""
+    http_part = conf[conf.index("http {") : conf.index("server {")]
+    return {
+        name: value
+        for name, value in re.findall(
+            r'^\s*add_header\s+(\S+)\s+"([^"]*)"\s+always;', http_part, re.M
+        )
+    }
+
+
+def test_nginx_sends_security_headers(nginx_conf):
+    headers = _http_block_headers(nginx_conf)
+
+    assert headers.get("X-Content-Type-Options") == "nosniff"
+    assert headers.get("Referrer-Policy") == "no-referrer"
+    csp = headers.get("Content-Security-Policy", "")
+    for directive in (
+        "default-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'none'",
+        "img-src 'self' data:",
+    ):
+        assert directive in csp, directive
+    # An add_header in a location drops every inherited header for that location.
+    server_part = nginx_conf[nginx_conf.index("server {") :]
+    assert "add_header" not in server_part
+
+
+def test_nginx_server_tokens_off(nginx_conf):
+    assert _directive_values(nginx_conf, "server_tokens") == ["off"]

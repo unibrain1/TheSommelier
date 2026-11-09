@@ -32,7 +32,7 @@ ENRICHED_FIELDS = [
 ]
 
 # Fields documented as scalar strings in the enrichment schema.
-# Claude occasionally returns a list for these; we normalize before caching.
+# Claude occasionally returns a list for these. _validate_enriched keeps the first string.
 SCALAR_FIELDS: frozenset[str] = frozenset(
     {
         "protein",
@@ -47,7 +47,19 @@ SCALAR_FIELDS: frozenset[str] = frozenset(
         "spice_heat",
     }
 )
-# NOTE: sides, dominant_flavor_axis, pairing_priorities are intentional arrays — omit them.
+LIST_FIELDS: frozenset[str] = frozenset(ENRICHED_FIELDS) - SCALAR_FIELDS
+# The values that build_enrichment_prompt asks for.
+ENUM_VALUES: dict[str, frozenset[str]] = {
+    "sauce_intensity": frozenset({"light", "medium", "heavy"}),
+    "richness": frozenset({"light", "medium", "rich"}),
+    "acidity": frozenset({"low", "medium", "medium-high", "high"}),
+    "sweetness": frozenset({"low", "medium", "high"}),
+    "spice_heat": frozenset({"none", "low", "medium", "high"}),
+}
+# A food feature is a few words, and the prompt asks for 1-3 list items. Longer
+# text or more items is not a food feature.
+MAX_FIELD_CHARS = 80
+MAX_LIST_ITEMS = 5
 
 
 def text_hash(text: str) -> str:
@@ -93,53 +105,99 @@ Menu entries:
 
 
 def load_cache(cache_path: Path) -> dict[str, dict]:
-    """Load enrichment cache (keyed by text hash)."""
-    if cache_path.exists() and cache_path.stat().st_size > 0:
-        try:
-            return json.loads(cache_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            print(f"WARNING: Could not load enrichment cache: {e}", file=sys.stderr)
-    return {}
+    """Load enrichment cache (keyed by text hash), with each entry checked again.
 
-
-def _normalize_enriched(enriched: dict) -> dict:
-    """Coerce scalar fields to strings before caching.
-
-    Claude occasionally returns a list (e.g. protein=["salmon", "shrimp"]) or a
-    non-string scalar (e.g. richness=3) for fields documented as scalar strings.
-    This normalizes them so bad shapes never enter the cache.
-
-    - list  → first string element; if none, field is omitted
-    - non-string scalar (int, float, bool, …) → str(val)
-    - correct string → unchanged
-    - array fields (sides, dominant_flavor_axis, pairing_priorities) → untouched
+    An older release cached LLM output with no check. Each entry is checked,
+    also one for a meal that is not on the menu now, because _write_files
+    writes the whole cache back. An entry with no usable field is dropped, so
+    its meal is enriched again.
     """
-    result = dict(enriched)  # shallow copy — never mutate the caller's dict
-    for field in SCALAR_FIELDS:
-        val = result.get(field)
+    if not (cache_path.exists() and cache_path.stat().st_size > 0):
+        return {}
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        _warn(f"cache could not be loaded: {e}")
+        return {}
+    if not isinstance(data, dict):
+        _warn(f"cache was {type(data).__name__}, not an object — cache ignored")
+        return {}
+    checked = {h: _validate_enriched(entry) for h, entry in data.items()}
+    return {h: entry for h, entry in checked.items() if entry is not None}
+
+
+def _warn(message: str) -> None:
+    print(f"WARNING: enrichment {message}", file=sys.stderr)
+
+
+def _validate_scalar(field: str, val: object) -> str | None:
+    """Return the usable string for a scalar field, or None to drop the field."""
+    if isinstance(val, list):
+        val = next((v for v in val if isinstance(v, str)), None)
         if val is None:
+            _warn(f"field '{field}' had no string elements — field omitted")
+            return None
+        _warn(f"field '{field}' was a list — coerced to scalar")
+    elif isinstance(val, (int, float, bool)):
+        _warn(f"field '{field}' was {type(val).__name__} — coerced to string")
+        val = str(val)
+    elif not isinstance(val, str):
+        _warn(f"field '{field}' was {type(val).__name__} — field omitted")
+        return None
+    val = val.strip()
+    if not val or len(val) > MAX_FIELD_CHARS:
+        _warn(f"field '{field}' was empty or too long — field omitted")
+        return None
+    if field in ENUM_VALUES:
+        val = val.lower()
+        if val not in ENUM_VALUES[field]:
+            _warn(f"field '{field}' was not an allowed value — field omitted")
+            return None
+    return val
+
+
+def _validate_list(field: str, val: object) -> list[str] | None:
+    """Return the usable strings for a list field, or None to drop the field."""
+    if not isinstance(val, list):
+        _warn(f"field '{field}' was {type(val).__name__}, not a list — field omitted")
+        return None
+    items = [v.strip() for v in val if isinstance(v, str)]
+    items = [v for v in items if v and len(v) <= MAX_FIELD_CHARS]
+    if len(items) < len(val):
+        _warn(f"field '{field}' had items that are not short strings — items omitted")
+    if len(items) > MAX_LIST_ITEMS:
+        _warn(f"field '{field}' had more than {MAX_LIST_ITEMS} items — list cut")
+        items = items[:MAX_LIST_ITEMS]
+    if not items:
+        _warn(f"field '{field}' had no usable items — field omitted")
+        return None
+    return items
+
+
+def _validate_enriched(enriched: object) -> dict | None:
+    """Return a checked copy of one entry's LLM features, or None if nothing is usable.
+
+    The LLM output comes from untrusted menu text, so each field is checked for
+    type, length and allowed values before it goes into the cache or to pairing.
+    A bad field is dropped. A warning names the field, never a value. An
+    unknown key is LLM text, so its warning shows at most 40 characters of it.
+    """
+    if not isinstance(enriched, dict):
+        _warn(f"entry was {type(enriched).__name__}, not an object — entry omitted")
+        return None
+    result: dict = {}
+    for field, val in enriched.items():
+        if field in SCALAR_FIELDS:
+            checked = _validate_scalar(field, val)
+        elif field in LIST_FIELDS:
+            checked = _validate_list(field, val)
+        else:
+            # The key is LLM text: repr and a length limit keep the log line safe.
+            _warn(f"unknown field {repr(field)[:40]} — field omitted")
             continue
-        if isinstance(val, list):
-            first = next((v for v in val if isinstance(v, str)), None)
-            if first is not None:
-                result[field] = first
-                print(
-                    f"WARNING: enrichment field '{field}' was a list — coerced to scalar",
-                    file=sys.stderr,
-                )
-            else:
-                del result[field]
-                print(
-                    f"WARNING: enrichment field '{field}' had no string elements — field omitted",
-                    file=sys.stderr,
-                )
-        elif not isinstance(val, str):
-            result[field] = str(val)
-            print(
-                f"WARNING: enrichment field '{field}' was {type(val).__name__} — coerced to string",
-                file=sys.stderr,
-            )
-    return result
+        if checked is not None:
+            result[field] = checked
+    return result or None
 
 
 def enrich_menu(
@@ -156,12 +214,8 @@ def enrich_menu(
     for entry in menu:
         h = text_hash(entry["meal"])
         if h in cache:
-            normalized = _normalize_enriched(cache[h])
-            cache[h] = (
-                normalized  # update in-memory cache so _write_files repairs the file
-            )
             results.append(
-                {"raw": entry["meal"], "hash": h, "enriched": normalized, **entry}
+                {"raw": entry["meal"], "hash": h, "enriched": cache[h], **entry}
             )
         else:
             results.append({"raw": entry["meal"], "hash": h, "enriched": None, **entry})
@@ -190,9 +244,11 @@ def enrich_menu(
     # Map enrichments back to results
     enriched_count = 0
     for batch_idx, (result_idx, entry) in enumerate(to_enrich):
-        enriched = enrichments.get(str(batch_idx))
-        if enriched and isinstance(enriched, dict):
-            enriched = _normalize_enriched(enriched)
+        raw = enrichments.get(str(batch_idx))
+        if raw is None:
+            continue
+        enriched = _validate_enriched(raw)
+        if enriched is not None:
             h = results[result_idx]["hash"]
             results[result_idx]["enriched"] = enriched
             cache[h] = enriched

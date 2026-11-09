@@ -293,3 +293,86 @@ def test_entrypoint_refuses_a_site_dir_other_than_data_site(sandbox):
 
     assert result.returncode != 0
     assert "must be /data/site" in result.stderr
+
+
+@pytest.mark.parametrize("var", ["SYNC_SCHEDULE", "DIGEST_SEND_SCHEDULE"])
+def test_container_stops_on_schedule_with_newline(sandbox, var):
+    # The second line would be a crontab entry that runs a command.
+    env = [arg for k, v in FAKE_ENV.items() for arg in ("-e", f"{k}={v}")]
+
+    result = _docker(
+        "run", "--rm", "--network", "none", "-v", f"{sandbox.volume}:/data", *HARDENING, *env,
+        "-e", f"{var}=0 1 * * *\n* * * * * touch /tmp/injected", sandbox.image,
+        check=False, timeout=120,
+    )  # fmt: skip
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert f"ERROR: {var} holds a control character" in output
+    assert "==> Ready." not in output
+    assert "touch /tmp/injected" not in output
+
+
+def test_container_stops_on_cron_expression_that_is_not_valid(sandbox):
+    # supercronic runs in the background. Without the -test step, a bad line
+    # stops every job, and the container still prints Ready.
+    env = [arg for k, v in FAKE_ENV.items() for arg in ("-e", f"{k}={v}")]
+
+    result = _docker(
+        "run", "--rm", "--network", "none", "-v", f"{sandbox.volume}:/data", *HARDENING, *env,
+        "-e", "SYNC_SCHEDULE=not a cron expression", sandbox.image,
+        check=False, timeout=120,
+    )  # fmt: skip
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "ERROR: The crontab is not valid." in output
+    assert "==> Ready." not in output
+
+
+def test_container_uses_the_default_for_a_blank_schedule(sandbox):
+    name = sandbox.start("blank-schedule", "-e", "SYNC_SCHEDULE=;")
+    log = sandbox.wait_ready(name)
+
+    assert "WARNING: SYNC_SCHEDULE has no cron expression. Using the default." in log
+    assert "Scheduled sync: */30 6-21 * * *;0 22 * * *" in log
+    crontab = _exec(name, "cat", "/tmp/crontab").stdout.splitlines()
+    assert len(crontab) == 3, crontab
+    sandbox.remove_container(name)
+
+
+def test_check_warns_op_service_account_token_in_the_container(running):
+    name, _ = running
+
+    result = _docker(
+        "exec", "-e", "OP_SERVICE_ACCOUNT_TOKEN=x", name,
+        "python3", "/app/scripts/settings.py", "check",
+        check=False,
+    )  # fmt: skip
+
+    assert result.returncode == 0
+    assert "WARNING: OP_SERVICE_ACCOUNT_TOKEN is set." in result.stderr
+
+
+def test_notes_generate_in_the_image(sandbox):
+    """The allow list must leave the CLI all it needs. Needs a real token."""
+    token = os.environ.get("SOMMELIER_CLAUDE_TEST_TOKEN", "")
+    if not token:
+        pytest.skip("set SOMMELIER_CLAUDE_TEST_TOKEN to a Claude subscription token")
+    # PASSWORD is set as in production, so the CLI runs with the allow list
+    # applied. The unit tests check that it does not pass. The reply proves that
+    # the CLI ran.
+    code = (
+        "import sys; sys.path.insert(0, '/app/scripts'); import wine_utils; "
+        "reply = wine_utils.call_claude('Reply with the word OK and nothing else.'); "
+        "print(reply); sys.exit(0 if reply else 1)"
+    )
+
+    result = _docker(
+        "run", "--rm", *HARDENING, "-e", f"CLAUDE_CODE_OAUTH_TOKEN={token}",
+        "-e", "PASSWORD=canary-password-143", "--entrypoint", "python3", sandbox.image,
+        "-c", code, check=False, timeout=300,
+    )  # fmt: skip
+
+    assert result.returncode == 0, result.stderr[-500:]
+    assert "OK" in result.stdout.upper()

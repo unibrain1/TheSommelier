@@ -188,8 +188,9 @@ def call_claude(prompt: str) -> str:
             capture_output=True,
             text=True,
             timeout=120,
-            # Only the credential of the chosen mode. Other variables, such as
-            # the CLAUDE_CODE_USE_* provider flags, pass through unchanged.
+            # An allow list, so a secret in .env such as PASSWORD does not
+            # reach the CLI. Of the Claude credentials, only the key of the
+            # chosen mode passes.
             env=settings.claude_env(os.environ),
         )
     except subprocess.TimeoutExpired:
