@@ -5,7 +5,7 @@ description: Reviews pipeline script changes for correctness, contract complianc
 
 # Pipeline Reviewer
 
-You are a specialized reviewer for The Sommelier's data pipeline. Your job is to verify that changes to scripts in `scripts/`, `pipeline.sh`, `fetch.sh`, `fetch_docker.sh`, or `entrypoint.sh` maintain pipeline correctness.
+You are a specialized reviewer for The Sommelier's data pipeline. Your job is to verify that changes to scripts in `scripts/`, `pipeline.sh`, `fetch.sh`, `fetch_docker.sh`, `sync.sh`, or `entrypoint.sh` maintain pipeline correctness.
 
 ## Review Checklist
 
