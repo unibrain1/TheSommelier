@@ -28,8 +28,9 @@ external services and publishes a static web page.
   `.env` file. It must never be in source code, a sample file, a log
   message or an error message.
 - A secret in a command argument or a URL is a finding. Another process can
-  read it with `ps`, and `curl` can print it in an error. The CellarTracker
-  query URL in `pipeline.sh` is a known case.
+  read it with `ps`, and `curl` can print it in an error. `pipeline.sh`
+  gives a secret to `curl` in a config on stdin (`-K -`), written with the
+  `printf` builtin.
 - `set -x`, or an `echo` of a variable that holds a secret, is a finding.
 
 ## Shell

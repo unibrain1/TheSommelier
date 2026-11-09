@@ -61,6 +61,21 @@ def test_script_runs_no_git_and_no_pip_install(script):
         assert "pip install" not in line, f"{script}: {line}"
 
 
+@pytest.mark.parametrize(
+    ("getter", "var"),
+    [("sync_schedule", "SYNC_SCHEDULE"), ("digest_schedule", "DIGEST_SEND_SCHEDULE")],
+)
+def test_entrypoint_reads_schedules_from_settings(getter, var):
+    # settings.py stops a value with a newline. A direct env read would put
+    # that value into the crontab, where each line is a command.
+    code = "\n".join(_code_lines("entrypoint.sh"))
+    assert re.search(
+        rf"=\$\(python3 /app/scripts/settings\.py get {getter}\) \|\| (exit 1|\{{)",
+        code,
+    )
+    assert not re.search(rf"\$\{{?{var}\b", code)
+
+
 def test_dockerfile_user_is_numeric_and_not_root():
     users = _instructions("USER")
 
@@ -152,3 +167,29 @@ def test_dockerignore_excludes(path):
 def test_dockerignore_keeps_what_the_container_runs(path):
     assert (REPO / path).exists(), path
     assert not _ignored(path), f"{path} would be missing from the image"
+
+
+# --- Supply chain ----------------------------------------------------------
+
+
+def test_dockerfile_pins_base_image_by_digest():
+    froms = _instructions("FROM")
+
+    assert froms
+    for line in froms:
+        # The tag stays next to the digest, so Dependabot can update both.
+        assert re.match(r"python:3\.14-slim@sha256:[0-9a-f]{64}\b", line), line
+
+
+@pytest.mark.parametrize("arch", ("amd64", "arm64"))
+def test_dockerfile_checks_supercronic_sha256(arch):
+    args = dict(line.split("=", 1) for line in _instructions("ARG") if "=" in line)
+    sha = args.get(f"SUPERCRONIC_SHA256_{arch}", "")
+    assert re.fullmatch(r"[0-9a-f]{64}", sha), sha
+
+    runs = [line for line in _instructions("RUN") if "supercronic-linux-" in line]
+    assert len(runs) == 1
+    run = runs[0]
+    assert f"${{SUPERCRONIC_SHA256_{arch}}}" in run
+    assert "sha256sum -c -" in run
+    assert "--connect-timeout" in run and "--max-time" in run

@@ -29,6 +29,7 @@ def _capture_run(monkeypatch):
 def test_call_claude_passes_only_the_mode_credential(clean_env):
     clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "SECRET-canary-oauth")
     clean_env.setenv("ANTHROPIC_AUTH_TOKEN", "SECRET-canary-gw")
+    clean_env.setenv("PASSWORD", "SECRET-canary-password")
     clean_env.setenv("PATH", "/usr/bin:/bin")
     calls = _capture_run(clean_env)
 
@@ -38,6 +39,7 @@ def test_call_claude_passes_only_the_mode_credential(clean_env):
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "SECRET-canary-oauth"
     assert "ANTHROPIC_AUTH_TOKEN" not in env
     assert "ANTHROPIC_API_KEY" not in env
+    assert "PASSWORD" not in env
     assert env["PATH"] == "/usr/bin:/bin"
 
 
