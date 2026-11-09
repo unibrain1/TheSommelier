@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -953,7 +954,7 @@ def test_pipeline_without_calendar_url_runs(harness):
     # The four CellarTracker fetches ran. No call went to the calendar.
     urls = harness.curl_urls()
     assert len(urls) == 4, urls
-    assert all("cellartracker.com" in u for u in urls), urls
+    assert all(urlparse(u).hostname == "www.cellartracker.com" for u in urls), urls
     assert not any("calendar" in u or u.endswith(".ics") for u in urls), urls
     for folder in (data, site):
         assert not (folder / "pairing_suggestions.json").exists()
