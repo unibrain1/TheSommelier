@@ -35,8 +35,8 @@ Do not commit `.env`. Git ignores it.
 | `PASSWORD` | none | Yes | CellarTracker password. |
 | `GOOGLE_CALENDAR_ICS_URL` | none | No | Menu pairing. Secret `.ics` URL (`http://` or `https://`) of the menu calendar. With `http://`, each sync logs a warning, because the URL holds a secret. |
 | `TZ` | `America/Los_Angeles` in `compose.yaml` | No | Time zone of the plan weeks and the schedules. |
-| `SYNC_SCHEDULE` | `*/30 6-21 * * *;0 22 * * *` | No | Cron expressions for the sync, separated by `;`. A line break or other control character stops the container start. |
-| `DIGEST_SEND_SCHEDULE` | `0 8 * * *` | No | Cron expression of the morning digest email. A line break or other control character stops the container start. |
+| `SYNC_SCHEDULE` | `*/30 6-21 * * *;0 22 * * *` | No | Cron expressions for the sync, separated by `;`. A line break or other control character, or an expression that is not valid, stops the container start. |
+| `DIGEST_SEND_SCHEDULE` | `0 8 * * *` | No | One cron expression for the morning digest email. A line break or other control character, more than one expression, or an expression that is not valid stops the container start. |
 | `SMTP_USERNAME` | none | For the digest | Digest email. On when `SMTP_USERNAME`, `SMTP_PASSWORD` and `DIGEST_RECIPIENTS` are set. |
 | `SMTP_PASSWORD` | none | For the digest | Digest email. SMTP password. |
 | `DIGEST_RECIPIENTS` | none | For the digest | Digest email. Comma-separated addresses. |

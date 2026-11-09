@@ -139,9 +139,8 @@ services:
     restart: unless-stopped
     ports:
       # This binds all host interfaces. The site has no login and shows your
-      # menu and your cellar value. With HA_ENABLED, it also shows the bottle
-      # location in thisweek.json. To limit the site to the host, use
-      # "127.0.0.1:8080:8080".
+      # menu, your cellar value and the bottle location of each planned wine
+      # (plan.json). To limit the site to the host, use "127.0.0.1:8080:8080".
       - "8080:8080"
     # Optional: DNS servers, when the container cannot resolve names.
     # dns:

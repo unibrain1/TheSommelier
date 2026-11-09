@@ -1147,6 +1147,8 @@ ALLOWED_ENV = {
     "DISABLE_AUTOUPDATER": "1",
     "NODE_EXTRA_CA_CERTS": "/etc/ssl/ca.pem",
     "HTTPS_PROXY": "http://proxy.example.test:3128",
+    "ALL_PROXY": "socks5://proxy.example.test:1080",
+    "SSL_CERT_DIR": "/etc/ssl/certs",
     "CLAUDE_CODE_USE_BEDROCK": "1",
     "ANTHROPIC_BASE_URL": "https://gw.example.test",
 }
@@ -1233,21 +1235,44 @@ def test_check_gives_no_http_warning_for_https_or_a_bad_url(var):
         assert HTTP_WARNING[var] not in result.stderr
 
 
-def test_check_warns_op_service_account_token():
-    values = {**REQUIRED_VALUES, "OP_SERVICE_ACCOUNT_TOKEN": "SECRET-canary-op"}
-    result = run_cli(["check"], values)
-    assert result.returncode == 0
-    lines = [ln for ln in result.stderr.splitlines() if "OP_SERVICE" in ln]
+def _set_required(monkeypatch):
+    for var, value in REQUIRED_VALUES.items():
+        monkeypatch.setenv(var, value)
+
+
+def test_check_warns_op_service_account_token_in_a_container(monkeypatch, tmp_path):
+    marker = tmp_path / ".dockerenv"
+    marker.touch()
+    monkeypatch.setattr(settings, "CONTAINER_MARKERS", (str(marker),))
+    _set_required(monkeypatch)
+    monkeypatch.setenv("OP_SERVICE_ACCOUNT_TOKEN", "SECRET-canary-op")
+    _, warnings, errors = settings.check_lines()
+    assert errors == []
+    lines = [ln for ln in warnings if "OP_SERVICE" in ln]
     assert lines == [
         "WARNING: OP_SERVICE_ACCOUNT_TOKEN is set. The Sommelier does not use it. "
         "Remove it from .env."
     ]
-    assert "SECRET-canary" not in result.stdout + result.stderr
+    assert "SECRET-canary" not in "".join(warnings)
 
 
-def test_check_no_op_service_account_warning_when_unset():
-    result = run_cli(["check"], REQUIRED_VALUES)
-    assert "OP_SERVICE_ACCOUNT_TOKEN" not in result.stderr
+def test_check_no_op_service_account_warning_on_a_host(monkeypatch, tmp_path):
+    # op run for a checkout run needs the token in the shell.
+    monkeypatch.setattr(settings, "CONTAINER_MARKERS", (str(tmp_path / "none"),))
+    _set_required(monkeypatch)
+    monkeypatch.setenv("OP_SERVICE_ACCOUNT_TOKEN", "SECRET-canary-op")
+    _, warnings, _ = settings.check_lines()
+    assert not [ln for ln in warnings if "OP_SERVICE" in ln]
+
+
+def test_check_no_op_service_account_warning_when_unset(monkeypatch, tmp_path):
+    marker = tmp_path / ".dockerenv"
+    marker.touch()
+    monkeypatch.setattr(settings, "CONTAINER_MARKERS", (str(marker),))
+    _set_required(monkeypatch)
+    monkeypatch.delenv("OP_SERVICE_ACCOUNT_TOKEN", raising=False)
+    _, warnings, _ = settings.check_lines()
+    assert not [ln for ln in warnings if "OP_SERVICE" in ln]
 
 
 # --- schedules ----------------------------------------------------------
@@ -1271,7 +1296,8 @@ def test_get_schedule_rejects_control_character(name, char):
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr.strip() == (
-        f"ERROR: {var} holds a control character. Use one line."
+        f"ERROR: {var} holds a control character. "
+        "Use one line, with spaces between the fields."
     )
     assert "SECRET-canary" not in result.stderr
 
@@ -1294,9 +1320,29 @@ def test_get_schedule_default(name, unset, blank):
 @pytest.mark.parametrize("name", SCHEDULES)
 def test_get_schedule_gives_the_value(name):
     var, _ = SCHEDULES[name]
-    result = run_cli(["get", name], {var: "*/5 * * * *;0 1 * * *"})
+    result = run_cli(["get", name], {var: "*/5 * * * *"})
+    assert result.returncode == 0
+    assert result.stdout == "*/5 * * * *\n"
+
+
+def test_get_sync_schedule_gives_more_than_one_expression():
+    result = run_cli(
+        ["get", "sync_schedule"], {"SYNC_SCHEDULE": "*/5 * * * *;0 1 * * *"}
+    )
     assert result.returncode == 0
     assert result.stdout == "*/5 * * * *;0 1 * * *\n"
+
+
+@pytest.mark.parametrize("value", ["0 8 * * *;0 18 * * *", "0 8 * * *; ;0 18 * * *"])
+def test_get_digest_schedule_rejects_more_than_one_expression(value):
+    # entrypoint.sh writes the digest as one crontab line, and supercronic
+    # rejects the whole crontab for a ";" in it.
+    result = run_cli(["get", "digest_schedule"], {"DIGEST_SEND_SCHEDULE": value})
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.strip() == (
+        "ERROR: DIGEST_SEND_SCHEDULE holds more than one cron expression. Use one."
+    )
 
 
 @pytest.mark.parametrize("name", SCHEDULES)
@@ -1316,12 +1362,18 @@ def test_get_schedule_with_no_entry_gives_the_default_and_warns(name, value):
     )
 
 
-@pytest.mark.parametrize("name", SCHEDULES)
-def test_get_schedule_removes_blank_entries(name):
+@pytest.mark.parametrize(
+    ("name", "value", "expected"),
+    [
+        ("sync_schedule", "*/5 * * * *;\u00a0;  ;0 1 * * *;", "*/5 * * * *;0 1 * * *"),
+        ("digest_schedule", "\u00a0;  ;0 1 * * *;", "0 1 * * *"),
+    ],
+)
+def test_get_schedule_removes_blank_entries(name, value, expected):
     var, _ = SCHEDULES[name]
-    result = run_cli(["get", name], {var: "*/5 * * * *;\u00a0;  ;0 1 * * *;"})
+    result = run_cli(["get", name], {var: value})
     assert result.returncode == 0
-    assert result.stdout == "*/5 * * * *;0 1 * * *\n"
+    assert result.stdout == expected + "\n"
     assert result.stderr == ""
 
 

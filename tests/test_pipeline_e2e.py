@@ -99,7 +99,9 @@ while i < len(args):
     if arg == "-K":
         if args[i + 1] != "-":
             sys.exit(2)
-        lines = sys.stdin.read().splitlines()
+        # curl ends a config line only at \n. splitlines() also splits at
+        # U+2028 and other characters that real curl keeps in the value.
+        lines = sys.stdin.read().split("\n")
         i += 2
         continue
     if arg in ("--connect-timeout", "--max-time"):
@@ -1202,9 +1204,15 @@ def test_credentials_are_url_encoded(harness):
     ct_urls = [u for u in harness.curl_urls() if "Table=" in u]
     assert len(ct_urls) == 4, ct_urls
     # curl writes lowercase hex. Compare with no case, as curl versions differ.
-    expected = "User=a+user&Password=p%26w%22d%5cx+%25%2b%7b%7d".lower()
-    for url in ct_urls:
-        assert url.lower().endswith(expected), url
+    credentials = "User=a+user&Password=p%26w%22d%5cx+%25%2b%7b%7d"
+    base = "https://www.cellartracker.com/xlquery.asp?Format=tab&Table="
+    expected = {
+        f"{base}Inventory&Location=1&{credentials}".lower(),
+        f"{base}Notes&{credentials}".lower(),
+        f"{base}FoodTags&{credentials}".lower(),
+        f"{base}Consumed&{credentials}".lower(),
+    }
+    assert {u.lower() for u in ct_urls} == expected
 
 
 def test_every_curl_in_pipeline_has_timeouts():

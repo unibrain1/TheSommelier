@@ -26,6 +26,8 @@ rm -f "${SITE_DIR}"/.thisweek.json.* "${SITE_DIR}"/.today.json.*
 
 # --- FETCH (scripted) ---
 CURL_TIMEOUTS=(--connect-timeout 15 --max-time 300)
+# -S logs the cause of a failure (DNS, timeout, HTTP code). The message names
+# the host, not the query, so no secret goes into the log.
 
 # A secret goes to curl in a config on stdin, not in argv, where `ps` shows
 # it. Only builtins (printf, parameter expansion) touch it, so no child process
@@ -36,13 +38,13 @@ CURL_TIMEOUTS=(--connect-timeout 15 --max-time 300)
 curl_quote() { local v=${1//\\/\\\\}; printf '"%s"' "${v//\"/\\\"}"; }
 
 # $1 = Table value, $2 = output file, $3 = an optional extra query parameter.
-# User and Password come last and next to each other, URL-encoded by curl.
+# curl URL-encodes User and Password, so a value is plain text, not encoded.
 ct_fetch() {
   local extra=""
   [[ -n "${3:-}" ]] && extra="data = \"$3\""$'\n'
   printf 'url = "https://www.cellartracker.com/xlquery.asp"\nget\ndata = "Format=tab"\ndata = "Table=%s"\n%sdata-urlencode = %s\ndata-urlencode = %s\n' \
     "$1" "${extra}" "$(curl_quote "User=${USERNAME}")" "$(curl_quote "Password=${PASSWORD}")" \
-    | curl -sf "${CURL_TIMEOUTS[@]}" -K - -o "$2"
+    | curl -sSf "${CURL_TIMEOUTS[@]}" -K - -o "$2"
 }
 
 MENU_ON=0
@@ -69,7 +71,7 @@ if [[ ${MENU_ON} -eq 1 ]]; then
   # The URL is a secret, so it goes on stdin too. globoff: curl must not read
   # {} or [] in the URL as a glob.
   printf 'url = %s\ngloboff\n' "$(curl_quote "${GOOGLE_CALENDAR_ICS_URL}")" \
-    | curl -sf "${CURL_TIMEOUTS[@]}" -K - -o "${DATA_DIR}/menu.ics" &
+    | curl -sSf "${CURL_TIMEOUTS[@]}" -K - -o "${DATA_DIR}/menu.ics" &
   PID_CAL=$!
 else
   # Files from an earlier run would give pairings for a menu that is gone. A

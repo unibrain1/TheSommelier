@@ -20,7 +20,8 @@ gives the default, and check logs a warning.
 get removes each blank entry (between ";") of SYNC_SCHEDULE or
 DIGEST_SEND_SCHEDULE. A value with no entry left gives the default and a
 warning. Only SYNC_SCHEDULE can hold more than one cron expression.
-get exits 1 when a schedule holds a control character, such as a line break.
+get exits 1 (not 2) when a schedule holds a control character, such as a line
+break, or when DIGEST_SEND_SCHEDULE holds more than one cron expression.
 
 A feature turns on when all its settings are present and valid. Only
 home_assistant has a <FEATURE>_ENABLED flag. It has no settings, so it turns
@@ -66,16 +67,22 @@ CLAUDE_ENV_NAMES = frozenset(
         "http_proxy",
         "https_proxy",
         "no_proxy",
+        "ALL_PROXY",
+        "all_proxy",
         "NODE_EXTRA_CA_CERTS",
         "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
         "CLAUDE_CONFIG_DIR",
     }
 )
 CLAUDE_ENV_PREFIXES = ("LC_", "CLAUDE_CODE_", "ANTHROPIC_", "DISABLE_")
 
 # The container gets its secrets from the host and runs no 1Password CLI. A
-# service account token left in .env is a secret with no use.
+# service account token left in .env is a secret with no use. A checkout run
+# with 1Password on a host needs the token, so check warns only in a container.
 UNUSED_OP_VAR = "OP_SERVICE_ACCOUNT_TOKEN"
+# Docker writes /.dockerenv and Podman writes /run/.containerenv.
+CONTAINER_MARKERS = ("/.dockerenv", "/run/.containerenv")
 
 # The SSH push to Home Assistant was removed in v4.0.0. A host that still sets
 # this variable would otherwise see frozen sensors with no signal.
@@ -459,13 +466,16 @@ def health_max_age_minutes() -> int:
     return _health_max_age() or DEFAULT_HEALTH_MAX_AGE_MINUTES
 
 
-def _schedule(var: str, default: str) -> str:
-    # The host value goes into the crontab as is. A newline would add a crontab
+def _schedule(var: str, default: str, multiple: bool) -> str:
+    # Each entry goes into the crontab as given. A newline would add a crontab
     # line that runs any command.
     value = os.environ.get(var, "")
     # Before the blank check, so that a lone line break is an error, not blank.
     if _has_control_char(value):
-        raise SettingError(f"ERROR: {var} holds a control character. Use one line.")
+        raise SettingError(
+            f"ERROR: {var} holds a control character. "
+            "Use one line, with spaces between the fields."
+        )
     # A crontab line with no schedule makes supercronic reject the whole file,
     # digest line included. str.strip also removes a no-break space.
     entries = [entry for entry in value.split(";") if entry.strip()]
@@ -476,6 +486,12 @@ def _schedule(var: str, default: str) -> str:
                 file=sys.stderr,
             )
         return default
+    # entrypoint.sh writes the digest as one crontab line. A ";" in that line
+    # makes supercronic reject the whole crontab, sync lines included.
+    if not multiple and len(entries) > 1:
+        raise SettingError(
+            f"ERROR: {var} holds more than one cron expression. Use one."
+        )
     return ";".join(entries)
 
 
@@ -484,15 +500,16 @@ def sync_schedule() -> str:
 
     Raises SettingError when the value holds a control character.
     """
-    return _schedule("SYNC_SCHEDULE", DEFAULT_SYNC_SCHEDULE)
+    return _schedule("SYNC_SCHEDULE", DEFAULT_SYNC_SCHEDULE, multiple=True)
 
 
 def digest_schedule() -> str:
     """Return DIGEST_SEND_SCHEDULE with no blank entry, or the default when none is left.
 
-    Raises SettingError when the value holds a control character.
+    Raises SettingError when the value holds a control character or more than
+    one cron expression.
     """
-    return _schedule("DIGEST_SEND_SCHEDULE", DEFAULT_DIGEST_SCHEDULE)
+    return _schedule("DIGEST_SEND_SCHEDULE", DEFAULT_DIGEST_SCHEDULE, multiple=False)
 
 
 OP_WARNING = (
@@ -543,7 +560,7 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
             f"WARNING: {UNUSED_ANTHROPIC_VAR} is set. It is not used. "
             f"Remove it from .env. Set {CLAUDE_API_KEY} or {CLAUDE_OAUTH_TOKEN}."
         )
-    if _env(UNUSED_OP_VAR):
+    if _env(UNUSED_OP_VAR) and any(os.path.exists(m) for m in CONTAINER_MARKERS):
         warnings.append(
             f"WARNING: {UNUSED_OP_VAR} is set. The Sommelier does not use it. "
             "Remove it from .env."

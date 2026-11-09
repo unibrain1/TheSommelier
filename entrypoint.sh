@@ -23,6 +23,7 @@ nginx
 
 # Set up periodic sync with supercronic (runs as non-root)
 # SYNC_SCHEDULE can hold more than one cron expression, separated by ";".
+# DIGEST_SEND_SCHEDULE holds one.
 # Cron expressions contain spaces and commas, so neither can be the separator.
 # settings.py owns the defaults. It stops the start on a value with a newline,
 # because each line of the crontab is a command that supercronic runs. It also
@@ -40,6 +41,9 @@ printf '%s cd /app && flock -n -o '"${SYNC_LOCK}"' bash fetch_docker.sh\n' "${SY
 echo "${DIGEST_SCHEDULE} cd /app && bash send_digest.sh" >> /tmp/crontab
 echo "    Scheduled sync: ${SCHEDULE}"
 echo "    Scheduled digest: ${DIGEST_SCHEDULE}"
+# supercronic runs in the background, so a bad line would stop every job with
+# no sign here. -test checks the cron expressions before the start.
+supercronic -test /tmp/crontab || { echo "ERROR: The crontab is not valid. Check SYNC_SCHEDULE and DIGEST_SEND_SCHEDULE." >&2; exit 1; }
 supercronic /tmp/crontab &
 
 # Run the pipeline once (site is already serving)

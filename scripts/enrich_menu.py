@@ -56,6 +56,8 @@ ENUM_VALUES: dict[str, frozenset[str]] = {
     "sweetness": frozenset({"low", "medium", "high"}),
     "spice_heat": frozenset({"none", "low", "medium", "high"}),
 }
+# A food feature is a few words, and the prompt asks for 1-3 list items. Longer
+# text or more items is not a food feature.
 MAX_FIELD_CHARS = 80
 MAX_LIST_ITEMS = 5
 
@@ -177,7 +179,8 @@ def _validate_enriched(enriched: object) -> dict | None:
 
     The LLM output comes from untrusted menu text, so each field is checked for
     type, length and allowed values before it goes into the cache or to pairing.
-    A bad field is dropped. A warning names the field, never a value.
+    A bad field is dropped. A warning names the field, never a value. An
+    unknown key is LLM text, so its warning shows at most 40 characters of it.
     """
     if not isinstance(enriched, dict):
         _warn(f"entry was {type(enriched).__name__}, not an object — entry omitted")
