@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 
 from fetch_community_notes import (
     load_cache,
@@ -265,3 +266,30 @@ class TestLoadCache:
         p = tmp_path / "bad.json"
         p.write_text("{invalid json")
         assert load_cache(p) == {}
+
+
+# ---------------------------------------------------------------------------
+# Fetch error text
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_error_prints_type_only_never_url_or_token(tmp_path, monkeypatch, capsys):
+    import fetch_community_notes as fcn
+
+    url = "https://www.cellartracker.com/rssnote.asp?CK=SECRET-canary-ck-token"
+
+    def explode(request, timeout=None):
+        raise ValueError(f"bad request for {request.full_url} {url}")
+
+    monkeypatch.setattr(fcn.urllib.request, "urlopen", explode)
+    cache = tmp_path / "community_notes.json"
+
+    with pytest.raises(SystemExit) as exc:
+        fcn.fetch_community_notes(url, cache)
+
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "ERROR: RSS fetch failed (ValueError)"
+    assert "SECRET-canary" not in captured.out + captured.err
+    assert "cellartracker.com" not in captured.out + captured.err
+    assert not cache.exists()

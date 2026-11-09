@@ -42,11 +42,10 @@ def parse_consumed(tsv_path: str | Path) -> list[dict]:
 
 
 if __name__ == "__main__":
-    tsv = (
-        sys.argv[1]
-        if len(sys.argv) > 1
-        else str(Path(__file__).parent / "consumed.tsv")
-    )
+    if len(sys.argv) < 2:
+        print("Usage: parse_consumed.py <consumed.tsv>", file=sys.stderr)
+        sys.exit(2)
+    tsv = sys.argv[1]
     records = parse_consumed(tsv)
     json.dump(records, sys.stdout, indent=2, ensure_ascii=False)
     print()  # trailing newline

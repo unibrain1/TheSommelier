@@ -5,7 +5,10 @@ Reads plan.json and optionally CellarTracker notes/food tags and community
 notes to generate contextual tasting notes. Claude augments any existing
 CT tasting notes, community tasting notes, and food pairing data.
 
-Requires CLAUDE_CODE_OAUTH_TOKEN in the environment.
+Needs one Claude key in the environment: ANTHROPIC_API_KEY (API key mode) or
+CLAUDE_CODE_OAUTH_TOKEN (subscription mode). pipeline.sh runs this script only
+when settings.py reports the claude feature on. wine_utils.call_claude passes
+the key of the chosen mode to the CLI.
 
 Usage: generate_notes.py <plan.json> [notes.tsv] [foodtags.tsv] [community_notes.json] [inventory.json]
 """
@@ -18,6 +21,19 @@ from pathlib import Path
 from wine_utils import call_claude, extract_json
 
 BATCH_SIZE = 20  # bottles per Claude call to stay within context
+# The prompt asks for 1-2 sentences. A longer reply is not a note, and the
+# site publishes plan.json with no login.
+MAX_NOTE_CHARS = 400
+
+
+def valid_note(note: object) -> str | None:
+    """Return the note, stripped, if it is a usable string. Otherwise None."""
+    if not isinstance(note, str):
+        return None
+    note = note.strip()
+    if not note or len(note) > MAX_NOTE_CHARS:
+        return None
+    return note
 
 
 def parse_ct_notes(notes_path: str) -> dict[str, list[str]]:
@@ -224,9 +240,18 @@ def generate_notes(
                     file=sys.stderr,
                 )
                 continue
-            if week_num in week_map:
-                week_map[week_num]["note"] = note
-                notes_generated += 1
+            if week_num not in week_map:
+                continue
+            checked = valid_note(note)
+            if checked is None:
+                print(
+                    f"WARNING: Skipping the note for week {week_num}: "
+                    f"not a string of 1-{MAX_NOTE_CHARS} characters",
+                    file=sys.stderr,
+                )
+                continue
+            week_map[week_num]["note"] = checked
+            notes_generated += 1
 
     Path(plan_path).write_text(
         json.dumps(plan_data, indent=2, ensure_ascii=False), encoding="utf-8"

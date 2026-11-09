@@ -16,15 +16,17 @@ external services and publishes a static web page.
 | --- | --- | --- |
 | Shell | `pipeline.sh`, `fetch.sh`, `fetch_docker.sh`, `entrypoint.sh`, `send_digest.sh` | Secrets, quoting, error handling |
 | External data | `curl` calls in `pipeline.sh`, `scripts/fetch_community_notes.py` | Untrusted input from CellarTracker, Google Calendar and RSS |
+| Settings and secrets | `scripts/settings.py`, `scripts/healthcheck.py` | Secrets in logs and errors, the Healthchecks key in a URL |
 | LLM calls | `scripts/wine_utils.py` (`claude` CLI), `scripts/generate_notes.py`, `scripts/enrich_menu.py` | Prompt injection from menu text and wine notes |
 | Site | `site/index.html`, `site/picklist.html` | XSS from JSON data |
 | Container | `Dockerfile`, `docker-compose.yml` | User, mounts, pinned versions |
 
 ## Secrets
 
-- A secret must come from 1Password (`op read`, `op run`) or from a
-  git-ignored `.env` file. It must never be in source code, a sample file,
-  a log message or an error message.
+- A secret comes from the environment that the host injects (for example
+  `op run`, an Ansible vault, or compose `env_file`) or from a git-ignored
+  `.env` file. It must never be in source code, a sample file, a log
+  message or an error message.
 - A secret in a command argument or a URL is a finding. Another process can
   read it with `ps`, and `curl` can print it in an error. The CellarTracker
   query URL in `pipeline.sh` is a known case.
@@ -38,7 +40,7 @@ external services and publishes a static web page.
   environment must be quoted.
 - No `eval`, and no command that a script builds from a string.
 - A temporary file uses `mktemp`, not a fixed or predictable name.
-- A script stops when a required `op read` fails.
+- A script stops when a required setting is missing.
 
 ## Python
 

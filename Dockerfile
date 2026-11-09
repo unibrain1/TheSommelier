@@ -3,21 +3,13 @@ FROM python:3.14-slim AS base
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install system packages + Node.js for Claude Code CLI + git for self-updating
+# Install system packages + Node.js for Claude Code CLI
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nginx curl jq unzip nodejs npm git openssh-client \
+    nginx curl jq nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code@2.1.114
-
-# Install 1Password CLI (multi-arch: works on both amd64 and arm64)
-RUN ARCH=$(dpkg --print-architecture) \
-    && curl -sSfL "https://cache.agilebits.com/dist/1P/op2/pkg/v2.30.3/op_linux_${ARCH}_v2.30.3.zip" \
-       -o /tmp/op.zip \
-    && unzip -o /tmp/op.zip -d /usr/local/bin/ op \
-    && rm /tmp/op.zip \
-    && chmod +x /usr/local/bin/op
 
 # Install supercronic (cron for non-root containers)
 RUN ARCH=$(dpkg --print-architecture) \
@@ -29,19 +21,29 @@ RUN ARCH=$(dpkg --print-architecture) \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --root-user-action=ignore -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-# Create ansible user (matches host UID/GID)
+# A named user for UID 1000, the UID that the compose files and the docs use for the volumes
 RUN groupadd -g 1000 ansible && useradd -u 1000 -g 1000 -m ansible
 
-# Configure nginx to run as non-root
-RUN sed -i 's/user www-data;/user ansible;/' /etc/nginx/nginx.conf \
-    && mkdir -p /var/log/nginx /var/lib/nginx/body /run \
-    && chown -R ansible:ansible /var/log/nginx /var/lib/nginx /run /etc/nginx
+# HOME=/tmp because the root file system is read-only at run time. The Claude CLI writes its config there.
+ENV HOME=/tmp PYTHONDONTWRITEBYTECODE=1
 
+# The image holds the main nginx config. The process runs as UID 1000, so it keeps its pid and temp files in /tmp.
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# The code is owned by root and is read-only for UID 1000. The .dockerignore allow list picks the files.
 WORKDIR /app
+COPY . /app
 
-# Numeric form of the ansible user created above, so the host can resolve it (DL3066)
+# A new named volume copies the owner of /data on first use, so the volume is writable with no init step.
+RUN mkdir -p /data/site /config && chown 1000:1000 /data /data/site
+
+# Numeric form of the user above, so the host can resolve it (DL3066)
 USER 1000:1000
 
 EXPOSE 8080
+
+# The start period covers the first sync, which runs the Claude notes.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=15m --retries=3 \
+    CMD ["python3", "/app/scripts/container_health.py"]
 
 ENTRYPOINT ["/app/entrypoint.sh"]

@@ -1,20 +1,16 @@
-# Optional host-specific settings for docker-compose.yml.
+# Optional host-specific settings for docker-compose.yml, which builds the
+# image from a checkout. To run the published image with no checkout, use
+# examples/compose.yaml instead.
 #
 # To use this file:
 #   1. Copy it to docker-compose.override.yml (git ignores that file).
-#   2. Replace each placeholder. Docker creates an empty directory for a
-#      bind-mount source that does not exist, so set a real key path.
+#   2. Replace each placeholder.
 #   3. Remove the parts that you do not need.
 #
-# Docker Compose reads docker-compose.override.yml automatically when you do
-# not use -f. It adds "dns" and "ports" to the lists in docker-compose.yml, so
-# set these keys in this file only.
+# Compose adds "dns" and "ports" to the lists in docker-compose.yml, so set
+# these keys in this file only.
 services:
   the-sommelier:
-    volumes:
-      # Key for the Home Assistant push. Without it, the pipeline skips the push.
-      # Use a key for this push only, and set its mode to 600.
-      - ~/.ssh/<ha-key>:/run/secrets/ha_ssh_key:ro
     dns:
       - 192.0.2.10
       - 192.0.2.11
@@ -31,15 +27,21 @@ services:
     # To limit it to the host, use "127.0.0.1:8089:8080".
     ports:
       - "8089:8080"
+    # Optional: keep /data in a host folder instead of the sommelier-data
+    # volume. This entry replaces the /data entry of docker-compose.yml.
+    # The container runs as UID 1000, so the host folder must be writable by
+    # UID 1000. Set the same entry on run-now, so both use one folder.
+    # volumes:
+    #   - /srv/the-sommelier/data:/data
 
   run-now:
-    volumes:
-      - ~/.ssh/<ha-key>:/run/secrets/ha_ssh_key:ro
     dns:
       - 192.0.2.10
       - 192.0.2.11
       - 8.8.8.8
     # run-now needs no reverse proxy network, because it serves no requests.
+    # volumes:
+    #   - /srv/the-sommelier/data:/data
 
 networks:
   traefik_proxy:

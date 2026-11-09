@@ -8,21 +8,9 @@ pure set-difference logic:
 
 The "adjusted" change type is retired. This test suite covers the retired
 behavior as regression anchors as well as the new set-difference behavior.
-
-Mock strategy: plan_config must be injected into sys.modules before importing
-generate_plan because generate_plan imports plan_config at module level.
 """
 
-import sys
-from unittest.mock import MagicMock
-
-# ---------------------------------------------------------------------------
-# Module-level mock: must happen before any import of generate_plan
-# ---------------------------------------------------------------------------
-
-sys.modules.setdefault("plan_config", MagicMock())
-
-from generate_plan import diff_plans  # noqa: E402  (import after sys.modules patch)
+from generate_plan import diff_plans
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 
 Personal wine cellar management project. Maintains a multi-year wine drinking plan synchronized with a live CellarTracker inventory and a Google Calendar menu plan. A scheduled pipeline (every 30 minutes, 06:00–22:00 Pacific) generates a fresh plan, adds tasting notes via Claude, and publishes a web app.
 
-The pipeline flow is in `README.md`. `plans/` and `data/` are gitignored.
+The flow of a sync is in `docs/how-it-works.md`. The user docs start at `README.md`. `plans/` and `data/` are gitignored.
 
 ## Running the Pipeline
 
@@ -14,21 +14,33 @@ bash fetch.sh
 
 ## Running Tests
 
-Tests require `pytest` (install via `pip install pytest`).
+Tests run from the virtual environment in `.venv` (see `docs/running-from-a-checkout.md`). The system Python can be without `pytest`.
+
+```bash
+.venv/bin/python -m pytest tests/ -v --tb=short
+```
 
 ## Docker Deployment
 
 Production runs in Docker on the owner's homelab server. The commands to restart, rebuild, or read logs on that server are in a local `deploy` skill. That skill is not in git.
 
-`docker-compose.yml` is generic. Host settings (DNS, port, Traefik labels and network, HA SSH key) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. On the production server, the HomeLab Ansible deploy writes the override. It must never write the tracked `docker-compose.yml`, because a modified tracked file makes `git pull --ff-only` fail.
+Two compose files:
 
-The morning digest embeds `site/logo.png`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
+- `examples/compose.yaml` is for a user with no checkout. It uses the image `ghcr.io/unibrain1/thesommelier:4.0` and lists every compose option and every env variable with a comment. A test keeps its variable list in step with the code.
+- `docker-compose.yml` builds the image from a checkout (`build: .`). It is generic. Host settings (DNS, port, Traefik labels and network) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. Production does not use a checkout. It runs the published image from the HomeLab stack `services/applications/the-sommelier/`.
 
-Self-updating: container does `git pull` on startup and before each pipeline run.
-If the startup pull changes `entrypoint.sh`, the entrypoint starts itself again, so one `down/up` is enough. If the pull in `pipeline.sh` brings new commits, the pipeline starts its wrapper again, so the same run uses the new shell code.
-Code changes pushed to GitHub are picked up automatically on next `down/up` or scheduled run.
+`.github/workflows/publish-image.yml` builds the image for amd64 and arm64. A `vX.Y.Z` tag pushes `X.Y.Z`, `X.Y` and `latest`. A push to `main` or to a `milestone/**` branch pushes `edge`. A manual run needs the workflow file on `main`, and a manual run on a branch also pushes `edge`. A manual run on a tag fails, because only a version tag push can write a release tag. A pull request that changes an image file builds only. A prerelease tag (with `-`) does not push `latest`. The GHCR package stays private until the v4.0.0 release. Then the owner sets it to public in the package settings.
+
+The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
+
+The image holds the code. The container runs no `git` and no `pip install`. It does not update itself.
+A code change needs a new image. With the published image, run `docker compose pull`, then `docker compose down` and `up`. From a checkout, rebuild with `docker compose build`, then `docker compose down` and `up`.
 `docker compose restart` does NOT re-run the entrypoint — use `down/up` instead.
 `restart` keeps the stored container config. `down/up` and `run-now` read both compose files when they run.
+
+The container root is read-only. The `sommelier-data` named volume is at `/data`. The `./config` folder is at `/config`, read-only. Every write goes to `/data` or `/tmp`.
+
+The image has a `HEALTHCHECK` that runs `scripts/container_health.py`. The check passes when nginx serves `index.html` and the mtime of the published `plan.json` is recent. That mtime is the time of the last complete run. `HEALTH_MAX_AGE_MINUTES` sets the age limit. It is optional, and the default is 600. `settings.py` owns this rule. The `run-now` service disables the check.
 
 ## LLM vs Data Boundary
 
@@ -43,8 +55,8 @@ Implemented in `scripts/generate_plan.py`:
 - Priority: past peak → expiring → peak window → entering window → long-agers (held)
 - Long-ager hold: BeginConsume > current_year + 2, or hold back 2 if 3+ bottles
 - Seasonal: sparkling/rosé/white for spring-summer, bold reds for fall-winter
-- Evolution tracks and holidays configured in `scripts/plan_config.py` (gitignored, personal data)
-- Sample at `scripts/plan_config.py.sample`
+- Holidays and evolution tracks come from two optional YAML files in `CONFIG_DIR`: `holidays.yaml` and `evolution_tracks.yaml`. `CONFIG_DIR` defaults to `/config`, and `bash fetch.sh` uses `config/`. Git ignores both files, because they hold personal data. `scripts/plan_file.py` loads and checks them. No holidays file gives the default holidays. No tracks file gives no tracks. A field that is not valid stops the run. An old `plan.yaml` in the folder is not used, and the run logs a warning.
+- Samples at `config/holidays.yaml.sample` and `config/evolution_tracks.yaml.sample`. `scripts/convert_plan_config.py` converts a v3 `plan_config.py` one time and writes both files
 
 ## CellarTracker Data Sources
 
@@ -52,12 +64,15 @@ Implemented in `scripts/generate_plan.py`:
 - `Table=Notes` — user's tasting notes (augments Claude-generated notes)
 - `Table=FoodTags` — user's food pairing tags (augments pairing suggestions)
 - `Table=Consumed` — consumption history (non-fatal; continues without if fetch fails)
-- `rssnote.asp` RSS feed — community tasting notes for wines in your cellar (up to 200 items per fetch, cumulative cache at `data/community_notes.json`). Requires `CK` token in 1Password. Non-fatal; continues without if unavailable.
+- `rssnote.asp` RSS feed — community tasting notes for wines in your cellar (up to 200 items per fetch, cumulative cache at `$DATA_DIR/community_notes.json`). Needs `CT_COMMUNITY_NOTES_RSS` (the URL holds the `CK` token). Non-fatal; continues without if unavailable.
 
 ## Google Calendar Integration
 
+- Optional. The `menu` feature turns on when `GOOGLE_CALENDAR_ICS_URL` is set and valid (http/https URL). No `_ENABLED` flag
 - Menu data from Paprika-managed calendar via secret .ics URL
 - `GOOGLE_CALENDAR_ICS_URL` in `.env`
+- Menu off: no fetch, parse, enrichment or pairing. The run removes old `menu.ics`, `menu.json` and `pairing_suggestions.json`. `today.json` has `meal: null`. The digest sends no mail
+- Menu on: a failed fetch stops the run
 - UTC timestamps converted to Pacific time (`America/Los_Angeles`)
 - Keywords extracted using `wine_keywords.py`
 
@@ -73,12 +88,11 @@ Implemented in `scripts/generate_plan.py`:
 
 ## Home Assistant Integration
 
-The Home Assistant push and its troubleshooting steps are in the "Home Assistant" section of `README.md`. Steps for the owner's own server are in the local `deploy` skill, which is not in git.
+The Home Assistant pull (REST sensors, `HA_ENABLED`) and its troubleshooting steps are in `docs/home-assistant.md`. Steps for the owner's own server are in the local `deploy` skill, which is not in git.
 
 ## Deployment Gotchas
 
 - Shell scripts must have executable permission in git: `chmod +x *.sh && git add`
-- Docker volume mount requires `git config --global --add safe.directory /app` (handled in entrypoint)
 - Pre-commit hooks (ruff format) may modify files on first commit — re-stage and commit again
 - Claude Code CLI is version-pinned in the Dockerfile — update the pin deliberately when upgrading
 
@@ -88,7 +102,8 @@ The Home Assistant push and its troubleshooting steps are in the "Home Assistant
 - Pairing scores: `"good"`, `"partial"`, `"poor"`, `"neutral"`
 - `pipeline.sh` has all shared logic; `fetch.sh` and `fetch_docker.sh` are thin wrappers
 - Plan is regenerated from scratch every pipeline run — no manual editing of `plan.json`
-- Plan staged to `data/plan.json`, only published to `site/` when complete with notes
+- Plan staged to `$DATA_DIR/plan.json`, only published to `$SITE_DIR` when complete with notes. `DATA_DIR` defaults to `/data`. `SITE_DIR` defaults to `$DATA_DIR/site`. `bash fetch.sh` sets them to the `data/` and `site/` folders of the repo. `docker-compose.yml` sets none of them. In the container the defaults `/data`, `/data/site` and `/config` apply.
+- `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR`, `CONFIG_DIR` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid. Only `home_assistant` has a `<FEATURE>_ENABLED` flag. A flag set to false or to a value that is not valid turns the feature off. A feature with no settings (`home_assistant`) turns on only when its flag is a true value (`true`, `1` or `yes`). A flag in `settings.REMOVED_FLAGS` has no effect, and `check` warns. The `claude` feature has no flag. It turns on when exactly one of `ANTHROPIC_API_KEY` (API key mode) and `CLAUDE_CODE_OAUTH_TOKEN` (subscription mode) is set. With both set it is off, and `check` warns. `settings.claude_env()` gives the `claude` subprocess only the key of the chosen mode. An `op://` value counts as not resolved.
 - Shared utilities in `scripts/wine_utils.py` — do not duplicate `urgency_score`, `normalize`, `TYPE_TO_BADGE`, or `CURRENT_YEAR` in individual scripts
 - Composite scoring in `scripts/scoring.py` — `composite_score()` combines: window position (50%), seasonal fit (25%), diversity (10%), CT quality (10%), community signals (5%). Lower score = schedule sooner.
 - Community signals use RSS note data: recent score drift, note velocity, text-based window drift detection

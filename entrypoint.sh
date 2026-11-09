@@ -3,33 +3,22 @@ set -euo pipefail
 
 echo "==> Starting The Sommelier..."
 
-# Self-update from git
-# Bash keeps reading the copy of this file that it opened at start. If the pull
-# changes this file, start again so that the new version runs. ENTRYPOINT_REEXEC
-# stops a second pull, so the restart cannot loop.
-if [[ -z "${ENTRYPOINT_REEXEC:-}" ]]; then
-  git config --global --add safe.directory /app
-  ENTRYPOINT_HASH=$(git -C /app hash-object /app/entrypoint.sh 2>/dev/null || echo "unknown")
-  echo "==> Pulling latest from git..."
-  git -C /app pull --ff-only 2>&1 || echo "WARNING: git pull failed — running with current version"
-  if [[ "$(git -C /app hash-object /app/entrypoint.sh 2>/dev/null || echo "changed")" != "${ENTRYPOINT_HASH}" ]]; then
-    echo "==> entrypoint.sh changed, starting it again..."
-    ENTRYPOINT_REEXEC=1 exec /app/entrypoint.sh "$@"
-  fi
+# A failed command substitution inside mkdir's arguments does not stop the
+# script, and mkdir "" gives an error that does not name the cause.
+DATA_DIR=$(python3 /app/scripts/settings.py get data_dir) || { echo "ERROR: settings.py get data_dir failed" >&2; exit 1; }
+SITE_DIR=$(python3 /app/scripts/settings.py get site_dir) || { echo "ERROR: settings.py get site_dir failed" >&2; exit 1; }
+# nginx.conf has a fixed root for the run output. Another SITE_DIR, or a
+# DATA_DIR that moves the default SITE_DIR, gives a site that never shows a new plan.
+if [[ "${SITE_DIR}" != "/data/site" ]]; then
+  echo "ERROR: SITE_DIR is ${SITE_DIR}. In the container it must be /data/site, because nginx reads the run output only from that folder. Remove SITE_DIR and DATA_DIR from the environment." >&2
+  exit 1
 fi
-unset ENTRYPOINT_REEXEC
-
-# Install/update Python dependencies if requirements changed
-pip install --no-cache-dir --root-user-action=ignore -q -r /app/requirements.txt 2>&1 || true
-
-# Link nginx config from the repo
-ln -sf /app/nginx.conf /etc/nginx/sites-available/default
-
-# Ensure data directory exists
-mkdir -p /app/data
+mkdir -p "${DATA_DIR}" "${SITE_DIR}" || { echo "ERROR: Cannot create ${DATA_DIR} or ${SITE_DIR}. Check the volume and its owner." >&2; exit 1; }
 
 # Start nginx first so the site is available immediately
 echo "==> Starting web server on port 8080..."
+# /tmp is a tmpfs at run time, so the nginx temp folder is empty at each start.
+mkdir -p /tmp/nginx
 nginx
 
 # Set up periodic sync with supercronic (runs as non-root)
@@ -54,9 +43,8 @@ fi
 # supercronic does not overlap runs of one job, but the initial sync below is
 # not a supercronic job. The shared lock stops a scheduled run that starts
 # during the initial sync. A run that cannot get the lock is skipped.
-# -o keeps the lock out of child processes. Without it, the `op daemon` that
-# the first `op read` starts keeps the lock open after the run, and every
-# later run is skipped.
+# -o keeps the lock out of child processes. Without it, a child process that
+# lives after the run keeps the lock open, and every later run is skipped.
 SYNC_LOCK=/tmp/sync.lock
 printf '%s cd /app && flock -n -o '"${SYNC_LOCK}"' bash fetch_docker.sh\n' "${SYNC_EXPRS[@]}" > /tmp/crontab
 echo "${DIGEST_SCHEDULE} cd /app && bash send_digest.sh" >> /tmp/crontab

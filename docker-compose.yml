@@ -1,31 +1,52 @@
 # Generic file. Put host-specific settings (DNS, ports, reverse proxy labels,
-# networks, the Home Assistant SSH key) in docker-compose.override.yml.
+# networks, a bind mount for /data) in docker-compose.override.yml.
 # See docker-compose.override.yml.sample.
+#
+# No DATA_DIR, SITE_DIR or CONFIG_DIR here: the defaults /data, /data/site
+# and /config match the volumes below, and nginx reads the run
+# output only from /data/site. The the-sommelier entrypoint stops if
+# SITE_DIR is another folder. The run-now service has no entrypoint, so it
+# does not check this.
+
+x-sommelier: &sommelier
+  build: .
+  image: the-sommelier:local
+  user: "1000:1000"
+  env_file:
+    - .env
+  environment:
+    TZ: America/Los_Angeles
+  volumes:
+    - sommelier-data:/data
+    - ./config:/config:ro
+  # The code is in the image, and every write goes to /data or /tmp.
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
 services:
   the-sommelier:
-    build: .
+    <<: *sommelier
     container_name: the-sommelier
-    user: "1000:1000"
-    env_file:
-      - .env
     environment:
-      - TZ=America/Los_Angeles
-      - SYNC_SCHEDULE=*/30 6-21 * * *;0 22 * * *
-    volumes:
-      - ./:/app
+      TZ: America/Los_Angeles
+      SYNC_SCHEDULE: "*/30 6-21 * * *;0 22 * * *"
     restart: unless-stopped
 
   run-now:
-    build: .
+    <<: *sommelier
     container_name: the-sommelier-run
-    user: "1000:1000"
-    env_file:
-      - .env
-    environment:
-      - TZ=America/Los_Angeles
-    volumes:
-      - ./:/app
     entrypoint: []
     command: ["bash", "/app/fetch_docker.sh"]
+    # A one-time run serves no site, so the image health check does not apply.
+    healthcheck:
+      disable: true
     profiles:
       - run-now
+
+volumes:
+  sommelier-data:

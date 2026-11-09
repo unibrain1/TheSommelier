@@ -370,3 +370,69 @@ class TestFormatDigestHtmlLogo:
 class TestSourceGuard:
     def test_module_source_has_no_unibrain(self):
         assert "unibrain" not in Path(generate_digest.__file__).read_text()
+
+
+# ---------------------------------------------------------------------------
+# TestMainWithoutPairingFile: the menu feature is optional
+# ---------------------------------------------------------------------------
+
+
+class TestMainWithoutPairingFile:
+    @pytest.fixture
+    def site(self, tmp_path, monkeypatch):
+        from datetime import date, timedelta
+
+        monday = date.today() - timedelta(days=date.today().weekday())
+        plan = {"allWeeks": [_week(monday.strftime("%b %-d, %Y"))]}
+        (tmp_path / "plan.json").write_text(json.dumps(plan))
+        monkeypatch.setenv("SITE_DIR", str(tmp_path))
+        monkeypatch.setattr("sys.argv", ["generate_digest.py"])
+        return tmp_path
+
+    def test_menu_off_writes_digest_and_exits_2(self, site, monkeypatch):
+        monkeypatch.delenv("GOOGLE_CALENDAR_ICS_URL", raising=False)
+        # Digest files of an earlier run must be replaced, not kept.
+        (site / "digest.json").write_text('{"stale": true}')
+        (site / "digest.html").write_text("stale")
+
+        with pytest.raises(SystemExit) as exc:
+            generate_digest.main()
+
+        assert exc.value.code == 2
+        digest = json.loads((site / "digest.json").read_text())
+        assert "stale" not in digest
+        assert digest["has_content"] is False
+        assert digest["pairings"] == []
+        assert digest["wine"] is not None
+        assert (site / "digest.html").read_text() != "stale"
+
+    def test_menu_on_exits_1_and_names_the_file(self, site, monkeypatch, capsys):
+        monkeypatch.setenv("GOOGLE_CALENDAR_ICS_URL", "https://example.test/menu.ics")
+
+        with pytest.raises(SystemExit) as exc:
+            generate_digest.main()
+
+        assert exc.value.code == 1
+        assert "pairing_suggestions.json" in capsys.readouterr().err
+        assert not (site / "digest.json").exists()
+
+    def test_menu_off_with_a_pairing_file_still_uses_it(self, site, monkeypatch):
+        from datetime import date
+
+        monkeypatch.delenv("GOOGLE_CALENDAR_ICS_URL", raising=False)
+        pairings = {"suggestions": [_suggestion(date.today().isoformat(), "Dinner")]}
+        (site / "pairing_suggestions.json").write_text(json.dumps(pairings))
+
+        generate_digest.main()
+
+        digest = json.loads((site / "digest.json").read_text())
+        assert digest["has_content"] is True
+
+    def test_missing_plan_exits_1_with_menu_off(self, site, monkeypatch):
+        monkeypatch.delenv("GOOGLE_CALENDAR_ICS_URL", raising=False)
+        (site / "plan.json").unlink()
+
+        with pytest.raises(SystemExit) as exc:
+            generate_digest.main()
+
+        assert exc.value.code == 1

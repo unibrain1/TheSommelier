@@ -1,0 +1,185 @@
+# The Sommelier: sample compose file for the published image.
+# It needs no repo checkout. To use it:
+#
+#   1. Make a folder and go into it.
+#   2. Save this file as compose.yaml:
+#        curl -fsSLo compose.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/examples/compose.yaml
+#   3. Optional: set your own holidays and evolution tracks. Save one or
+#      both samples in the config folder, and change them for your cellar.
+#      Without holidays.yaml, the plan uses the default holidays. Without
+#      evolution_tracks.yaml, the plan uses no evolution tracks.
+#        mkdir -p config
+#        curl -fsSLo config/holidays.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/holidays.yaml.sample
+#        curl -fsSLo config/evolution_tracks.yaml https://raw.githubusercontent.com/unibrain1/TheSommelier/main/config/evolution_tracks.yaml.sample
+#   4. Give the secrets to compose. Choose one way:
+#        - A .env file next to this file with plain NAME=value lines. Compose
+#          reads it for the ${NAME} values below. Keep the file private.
+#          .env.sample in the repo lists the variables.
+#        - 1Password: write NAME=op://vault/item/field lines in op.env, then
+#          start with: op run --env-file=op.env -- docker compose up -d
+#   5. Start the container:
+#        docker compose up -d
+#   6. Open http://localhost:8080
+#
+# To run a sync one time now, without waiting for the schedule:
+#   docker compose run --rm run-now
+# To get a new image:
+#   docker compose pull && docker compose down && docker compose up -d
+#
+# The container needs two values: USERNAME and PASSWORD. Compose stops with
+# a message if one is missing.
+# Every other variable is optional. To use one, remove the "# " from its line.
+# A line with ${NAME} reads the value from the host environment or from .env.
+# The host environment wins. Windows always sets USERNAME, so set it in the
+# shell there before you start the container.
+# Change the other values here in this file.
+#
+# A feature turns on when all its settings are present and valid. To turn a
+# feature off, remove its settings. HA_ENABLED is a flag. It accepts true,
+# false, 1, 0, yes and no. An empty value turns the feature off and logs a
+# warning.
+#
+# Home settings (DNS, a reverse proxy, a bind mount for /data) are in the
+# commented examples at the end of each service.
+
+name: the-sommelier
+
+x-sommelier: &sommelier
+  image: ghcr.io/unibrain1/thesommelier:4.0
+  # The container runs as this user.
+  user: "1000:1000"
+  environment:
+    # --- Required ---
+    # CellarTracker login.
+    USERNAME: "${USERNAME:?Set USERNAME to your CellarTracker user name}"
+    PASSWORD: "${PASSWORD:?Set PASSWORD to your CellarTracker password}"
+
+    # --- Menu pairing ---
+    # Wine pairings for the menu plan in a Google Calendar. On when the URL is
+    # set. The secret .ics URL holds a token, so treat it as a secret.
+    # GOOGLE_CALENDAR_ICS_URL: "${GOOGLE_CALENDAR_ICS_URL}"
+
+    # --- Time zone and schedules ---
+    # The plan weeks and the schedules use this zone. The menu dates and the
+    # digest day always use Pacific time.
+    TZ: America/Los_Angeles
+    # One or more cron expressions, separated by ";". The sync runs at these
+    # times.
+    # Default: every 30 minutes from 06:00 to 21:30, and at 22:00.
+    # SYNC_SCHEDULE: "*/30 6-21 * * *;0 22 * * *"
+    # The cron expression for the morning digest email. Default: 08:00.
+    # DIGEST_SEND_SCHEDULE: "0 8 * * *"
+
+    # --- Morning digest email ---
+    # On when SMTP_USERNAME, SMTP_PASSWORD and DIGEST_RECIPIENTS are set.
+    # SMTP_USERNAME: "${SMTP_USERNAME}"
+    # SMTP_PASSWORD: "${SMTP_PASSWORD}"
+    # A comma-separated list of addresses.
+    # DIGEST_RECIPIENTS: user@example.com
+    # Default: smtp.gmail.com
+    # SMTP_HOST: smtp.gmail.com
+    # Default: 587
+    # SMTP_PORT: "587"
+    # The sender address. Default: the value of SMTP_USERNAME.
+    # SMTP_FROM: sender@example.com
+    # The public URL of your site. The digest email may use it to show the
+    # logo. Optional.
+    # SITE_URL: https://sommelier.example.com
+
+    # --- Tasting notes and menu enrichment (Claude) ---
+    # Set one of the two keys, or neither. With both set, the notes are off.
+    # The token uses your Claude subscription. Make the token on a computer
+    # where you are logged in to Claude with: claude setup-token
+    # The token expires one year after you make it.
+    # CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN}"
+    # The API key puts the runs on your API bill.
+    # ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+
+    # --- CellarTracker community notes ---
+    # The RSS feed URL. It holds a token, so treat it as a secret.
+    # CT_COMMUNITY_NOTES_RSS: "${CT_COMMUNITY_NOTES_RSS}"
+
+    # --- Healthchecks.io ---
+    # The full ping URL that Healthchecks.io shows for the check. It holds
+    # the key, so treat it as a secret. A failed run adds /fail. On when the
+    # URL is set.
+    # HEALTHCHECK_URL: "${HEALTHCHECK_URL}"
+
+    # --- Home Assistant ---
+    # Turns on the data for Home Assistant REST sensors. Default: off.
+    # docs/home-assistant.md in the repo has the sensor setup.
+    # HA_ENABLED: "true"
+
+    # --- Container health check ---
+    # Docker marks the container as unhealthy when the plan is older than this
+    # many minutes. Default: 600.
+    # HEALTH_MAX_AGE_MINUTES: "600"
+  volumes:
+    # The plan, the saved notes and the site. Keep it to keep your history.
+    - sommelier-data:/data
+    # Your optional holidays.yaml and evolution_tracks.yaml.
+    - ./config:/config:ro
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  # Rotate the container logs. The default driver keeps them without a limit.
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  the-sommelier:
+    <<: *sommelier
+    restart: unless-stopped
+    ports:
+      # This binds all host interfaces. The site has no login and shows your
+      # menu and your cellar value. To limit the site to the host, use
+      # "127.0.0.1:8080:8080".
+      - "8080:8080"
+    # Optional: DNS servers, when the container cannot resolve names.
+    # dns:
+    #   - 192.0.2.10
+    #   - 8.8.8.8
+    # Optional: a reverse proxy network and labels, for example Traefik. If
+    # you use a proxy, remove "ports" above.
+    # labels:
+    #   traefik.enable: "true"
+    #   traefik.http.routers.the-sommelier.rule: Host(`sommelier.example.com`)
+    #   traefik.http.routers.the-sommelier.entrypoints: https
+    #   traefik.http.routers.the-sommelier.tls: "true"
+    #   traefik.http.services.the-sommelier.loadbalancer.server.port: "8080"
+    # networks:
+    #   - traefik_proxy
+    # Optional: keep /data in a host folder instead of the sommelier-data
+    # volume. This key replaces the whole list above, so repeat the config
+    # entry. The host folder must be writable by UID 1000. Use the same folder
+    # on run-now.
+    # volumes:
+    #   - /srv/the-sommelier/data:/data
+    #   - ./config:/config:ro
+
+  # One sync, for a test or a first fill of the data. The profile
+  # keeps this service out of "docker compose up". Start it with:
+  #   docker compose run --rm run-now
+  run-now:
+    <<: *sommelier
+    entrypoint: []
+    command: ["bash", "/app/fetch_docker.sh"]
+    healthcheck:
+      disable: true
+    profiles:
+      - run-now
+
+volumes:
+  sommelier-data:
+
+# Optional: the external network of your reverse proxy.
+# networks:
+#   traefik_proxy:
+#     external: true
