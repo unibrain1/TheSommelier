@@ -19,7 +19,7 @@ on:
       - .github/workflows/publish-image.yml
   push:
     # A manual run needs the file on main, so a milestone branch pushes edge
-    # itself. That gives the pre-release image before the file reaches main.
+    # itself.
     branches: [main, "milestone/**"]
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
   workflow_dispatch:

@@ -641,7 +641,8 @@ def test_fetch_sh_reads_dotenv_when_one_required_value_is_missing(harness, missi
     assert result.returncode == 0, _output(result)
     urls = harness.curl_urls()
     assert urls
-    # The file is sourced after the env, so the file value wins for every name.
+    # The script sources the file after the env, so the file value wins for
+    # each name.
     assert any("User=fromfile&Password=fromfile-pw" in u for u in urls)
     assert "https://file.example.test/x.ics" in urls
 
@@ -696,6 +697,15 @@ def test_fetch_sh_with_menu_on_prints_pairing_summary(harness):
     assert "Pairing: menu feature is off" not in result.stdout
 
 
+def _write_digest(site: Path, html: str = "<html>digest</html>") -> None:
+    """Write the digest files that send_digest.py --force sends."""
+    (site / "digest.html").write_text(html, encoding="utf-8")
+    (site / "digest.json").write_text(
+        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
+        encoding="utf-8",
+    )
+
+
 def test_send_digest_sh_dry_run_without_op(harness):
     run = harness.run("fetch_docker.sh")
     assert run.returncode == 0, _output(run)
@@ -719,11 +729,7 @@ def test_send_digest_sh_with_dotenv_reads_site_folder_of_the_app(harness):
     site = harness.app / "site"
     site.mkdir()
     html = "<html>" + "x" * 94 + "</html>"
-    (site / "digest.html").write_text(html, encoding="utf-8")
-    (site / "digest.json").write_text(
-        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
-        encoding="utf-8",
-    )
+    _write_digest(site, html)
     (harness.app / ".env").write_text(
         "SMTP_USERNAME='sender@example.test'\n"
         "SMTP_PASSWORD='smtp-pw-canary'\n"
@@ -755,11 +761,7 @@ def test_send_digest_sh_with_dotenv_reads_site_folder_of_the_app(harness):
 def test_send_digest_sh_does_not_override_env_with_dotenv(harness):
     site = Path(harness.env["SITE_DIR"])
     site.mkdir(parents=True)
-    (site / "digest.html").write_text("<html>digest</html>", encoding="utf-8")
-    (site / "digest.json").write_text(
-        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
-        encoding="utf-8",
-    )
+    _write_digest(site)
     (harness.app / ".env").write_text(
         "SMTP_USERNAME='fromfile@example.com'\n"
         "SMTP_PASSWORD='fromfile-pw'\n"
@@ -782,15 +784,53 @@ def test_send_digest_sh_does_not_override_env_with_dotenv(harness):
     assert "fromfile" not in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("missing", ["SMTP_USERNAME", "SMTP_PASSWORD"])
+def test_send_digest_sh_reads_dotenv_when_one_smtp_secret_is_missing(harness, missing):
+    """One of the two secrets in the shell does not skip .env, as in fetch.sh."""
+    # Only the SMTP_PASSWORD case fails with the old rule, which checked only
+    # SMTP_USERNAME.
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    _write_digest(site)
+    (harness.app / ".env").write_text(
+        "SMTP_USERNAME='fromfile@example.com'\n"
+        "SMTP_PASSWORD='smtp-pw-canary'\n"
+        "DIGEST_RECIPIENTS='file@example.com'\n"
+    )
+
+    result = harness.run(
+        "send_digest.sh",
+        args=("--dry-run", "--force"),
+        extra={
+            "SMTP_USERNAME": "fromenv@example.com",
+            "SMTP_PASSWORD": "fromenv-pw",
+            "DIGEST_RECIPIENTS": "env@example.com",
+        },
+        drop=(missing,),
+    )
+
+    assert result.returncode == 0, _output(result)
+    # The script sources the file after the env, so the file value wins for
+    # each name.
+    assert "From: fromfile@example.com" in result.stdout
+    assert "To: file@example.com" in result.stdout
+    assert "smtp-pw-canary" not in result.stdout + result.stderr
+
+
+def test_send_digest_sh_checks_each_container_marker():
+    # The test host cannot create the marker files, so check the script text.
+    import settings
+
+    script = (REPO / "send_digest.sh").read_text(encoding="utf-8")
+    for marker in settings.CONTAINER_MARKERS:
+        assert f"! -f {marker}" in script, marker
+
+
 def test_send_digest_sh_without_dotenv_uses_repo_site_folder(harness):
     """On the host, fetch.sh writes to the repo folders with or without .env."""
     site = harness.app / "site"
     site.mkdir(exist_ok=True)
-    (site / "digest.html").write_text("<html>digest</html>", encoding="utf-8")
-    (site / "digest.json").write_text(
-        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
-        encoding="utf-8",
-    )
+    _write_digest(site)
     assert not (harness.app / ".env").exists()
 
     result = harness.run(

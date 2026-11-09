@@ -29,9 +29,9 @@ Two compose files:
 - `examples/compose.yaml` is for a user with no checkout. It uses the image `ghcr.io/unibrain1/thesommelier:4.0` and lists every compose option and every env variable with a comment. A test keeps its variable list in step with the code.
 - `docker-compose.yml` builds the image from a checkout (`build: .`). It is generic. Host settings (DNS, port, Traefik labels and network) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. Production does not use a checkout. It runs the published image from the HomeLab stack `services/applications/the-sommelier/`.
 
-`.github/workflows/publish-image.yml` builds the image for amd64 and arm64. A `vX.Y.Z` tag pushes `X.Y.Z`, `X.Y` and `latest`. A push to `main` or to a `milestone/**` branch pushes `edge`. A manual run needs the workflow file on `main`, and a manual run on a branch also pushes `edge`. A manual run on a tag fails, because only a version tag push can write a release tag. A pull request that changes an image file builds only. A prerelease tag (with `-`) does not push `latest`. The GHCR package stays private until the v4.0.0 release. Then the owner sets it to public in the package settings.
+`.github/workflows/publish-image.yml` builds the image for amd64 and arm64. A `vX.Y.Z` tag pushes `X.Y.Z`, `X.Y` and `latest`. A push to `main` or to a `milestone/**` branch pushes `edge`. A manual run needs the workflow file on `main`, and a manual run on a branch also pushes `edge`. A manual run on a tag fails, because only a version tag push can write a release tag. A pull request that changes an image file builds only. A prerelease tag (with `-`) does not push `latest`.
 
-The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
+The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set, or is not an `http://` or `https://` URL, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
 The image holds the code. The container runs no `git` and no `pip install`. It does not update itself.
 A code change needs a new image. With the published image, run `docker compose pull`, then `docker compose down` and `up`. From a checkout, rebuild with `docker compose build`, then `docker compose down` and `up`.
@@ -55,7 +55,7 @@ Implemented in `scripts/generate_plan.py`:
 - Priority: past peak → expiring → peak window → entering window → long-agers (held)
 - Long-ager hold: BeginConsume > current_year + 2, or hold back 2 if 3+ bottles
 - Seasonal: sparkling/rosé/white for spring-summer, bold reds for fall-winter
-- Holidays and evolution tracks come from two optional YAML files in `CONFIG_DIR`: `holidays.yaml` and `evolution_tracks.yaml`. `CONFIG_DIR` defaults to `/config`, and `bash fetch.sh` uses `config/`. Git ignores both files, because they hold personal data. `scripts/plan_file.py` loads and checks them. No holidays file gives the default holidays. No tracks file gives no tracks. A field that is not valid stops the run. An old `plan.yaml` in the folder is not used, and the run logs a warning.
+- Holidays and evolution tracks come from two optional YAML files in `CONFIG_DIR`: `holidays.yaml` and `evolution_tracks.yaml`. `CONFIG_DIR` defaults to `/config`, and `bash fetch.sh` uses `config/`. Git ignores both files, because they hold personal data. `scripts/plan_file.py` loads and checks them. No holidays file gives the default holidays. No tracks file gives no tracks. A field that is not valid stops the run.
 - Samples at `config/holidays.yaml.sample` and `config/evolution_tracks.yaml.sample`. `scripts/convert_plan_config.py` converts a v3 `plan_config.py` one time and writes both files
 
 ## CellarTracker Data Sources
