@@ -181,7 +181,10 @@ def call_claude(prompt: str) -> str:
     """Call Claude CLI with a prompt and return the response."""
     try:
         result = subprocess.run(
-            ["claude", "--print", "--model", "haiku", prompt],
+            # No tools: the prompt holds untrusted text (menu, CellarTracker
+            # and RSS notes), and the reply needs no file or shell access.
+            # --tools takes a list, so "--" ends it before the prompt.
+            ["claude", "--print", "--model", "haiku", "--tools", "", "--", prompt],
             capture_output=True,
             text=True,
             timeout=120,

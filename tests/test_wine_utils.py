@@ -19,7 +19,7 @@ def _capture_run(monkeypatch):
     calls = []
 
     def fake_run(args, **kwargs):
-        calls.append(kwargs)
+        calls.append({"args": args, **kwargs})
         return subprocess.CompletedProcess(args, 0, stdout=" reply \n", stderr="")
 
     monkeypatch.setattr(wine_utils.subprocess, "run", fake_run)
@@ -39,6 +39,19 @@ def test_call_claude_passes_only_the_mode_credential(clean_env):
     assert "ANTHROPIC_AUTH_TOKEN" not in env
     assert "ANTHROPIC_API_KEY" not in env
     assert env["PATH"] == "/usr/bin:/bin"
+
+
+def test_call_claude_gives_the_cli_no_tools(clean_env):
+    # .claude/rules/security.md: the claude CLI call gets no tools.
+    calls = _capture_run(clean_env)
+
+    wine_utils.call_claude("prompt")
+
+    args = calls[0]["args"]
+    assert args[args.index("--tools") + 1] == ""
+    # --tools takes a list. Without "--", the CLI reads the prompt as a tool
+    # name and gets no prompt (checked with the pinned CLI 2.1.114).
+    assert args[-2:] == ["--", "prompt"]
 
 
 def test_call_claude_passes_no_credential_when_both_keys_set(clean_env):
