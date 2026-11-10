@@ -67,7 +67,7 @@ The digest needs the menu feature. When the menu feature is off, the digest has 
 
 Claude writes a short tasting note for each bottle. It also reads the menu text to improve the pairings. A sync keeps a note while the wine and its marks (urgent, evolution and occasion) stay the same. A new score, window, CellarTracker note or community note does not change a kept note. Claude writes a note only for a new or changed week. Without Claude, a week keeps the note of the last plan if it has one. Other weeks have no note, and the pairings use keyword matching.
 
-A note stays while the week keeps the same wine and marks. A week with an empty or missing note gets a new note in the next sync, if Claude is on. To get new notes, remove the `note` values from the live `/data/site/plan.json`. Or delete that file, but this also clears the changelog history.
+A note stays while the week keeps the same wine and marks. A week with an empty or missing note gets a new note in the next sync, if Claude is on. To get new notes, remove the `note` values from the live `/data/site/plan.json`. Or delete that file, but this also clears the changelog history. Then start a sync with `docker compose run --rm run-now`. Until a sync completes, the site shows no plan and the container is unhealthy.
 
 There are three choices. Set at most one key.
 
