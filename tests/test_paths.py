@@ -146,7 +146,7 @@ class TestGeneratePlanPaths:
         generate_plan.main()
 
         err = capsys.readouterr().err
-        assert "could not back up plan" in err
+        assert "WARNING: could not back up plan" in err
         assert "could not read existing plan" not in err
         new_plan = json.loads(out.read_text(encoding="utf-8"))
         assert any(e.get("marker") == "LIVE-MARK" for e in new_plan["changelogHistory"])
@@ -156,12 +156,13 @@ class TestGeneratePlanPaths:
         [
             ("{not json", "WARNING: could not read existing plan"),
             ("[1, 2, 3]", "WARNING: existing plan has no usable allWeeks list"),
+            ("null", "WARNING: existing plan has no usable allWeeks list"),
             (
                 json.dumps({"allWeeks": [], "changelogHistory": ["entry"]}),
                 "WARNING: dropped 1 changelog history entries",
             ),
         ],
-        ids=["not-json", "no-weeks", "bad-history"],
+        ids=["not-json", "no-weeks", "null", "bad-history"],
     )
     def test_main_exits_3_when_the_live_plan_is_lost(
         self, dirs, generate_plan, monkeypatch, capsys, content, message

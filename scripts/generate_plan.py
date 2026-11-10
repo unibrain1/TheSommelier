@@ -1024,22 +1024,26 @@ def main() -> None:
     old_weeks: list[dict] | None = None
     old_history: list[dict] = []
     old_data = None
+    # True when a live plan file was read. A file that holds JSON null is
+    # still a live plan, so old_data alone cannot tell it from a first run.
+    old_read = False
     # True when the live plan exists but its history or notes are lost.
     previous_lost = False
     if live_plan_path.exists():
         try:
             old_data = json.loads(live_plan_path.read_text(encoding="utf-8"))
+            old_read = True
         except (json.JSONDecodeError, OSError) as exc:
             print(f"WARNING: could not read existing plan ({exc})", file=sys.stderr)
             previous_lost = True
     else:
         print(f"Note: no live plan at {live_plan_path}, changelog history starts empty")
-    if old_data is not None:
+    if old_read:
         # A bad file must not stop every later sync. The first good run
         # writes over it.
         weeks = old_data.get("allWeeks") if isinstance(old_data, dict) else None
         old_weeks = usable_weeks(weeks)
-        if old_weeks is None:
+        if old_weeks is None or not isinstance(old_data, dict):
             print(
                 "WARNING: existing plan has no usable allWeeks list, "
                 "so the run uses no previous plan and no changelog history",
@@ -1067,7 +1071,9 @@ def main() -> None:
             )
             print(f"Previous plan backed up to {previous_path}")
         except OSError as exc:
-            print(f"Warning: could not back up plan ({exc})", file=sys.stderr)
+            # Not counted in the ping and no exit 3: no code reads
+            # plan_previous.json, so the run loses nothing.
+            print(f"WARNING: could not back up plan ({exc})", file=sys.stderr)
 
     # Apply default drinking windows for wines missing CellarTracker data
     defaulted = apply_default_windows(inventory)
