@@ -145,16 +145,22 @@ def _logo_src(logo_dir: Path) -> str:
     return ""
 
 
+def _esc(value: object) -> str:
+    """Escape a data value for the digest HTML."""
+    return html.escape(str(value), quote=True)
+
+
 def format_digest_html(digest: dict, logo_src: str = "") -> str:
     """Format the digest as a branded HTML email.
 
     Structure: tonight's dinner recommendation first (action item),
-    then this week's planned wine (context).
+    then this week's planned wine (context). Each data value is escaped:
+    a note comes from CellarTracker community text through Claude.
     """
     wine = digest.get("wine")
     tonight = digest.get("tonight")
     pairings = digest.get("pairings", [])
-    date_display = digest.get("date_display", digest["date"])
+    date_display = _esc(digest.get("date_display", digest["date"]))
 
     # Tonight's dinner section (primary — the action item)
     tonight_html = ""
@@ -180,11 +186,11 @@ def format_digest_html(digest: dict, logo_src: str = "") -> str:
 
         sb_meta_parts = []
         if sb.get("window"):
-            sb_meta_parts.append(f"Window: {sb['window']}")
+            sb_meta_parts.append(f"Window: {_esc(sb['window'])}")
         if sb.get("urgency"):
-            sb_meta_parts.append(sb["urgency"])
+            sb_meta_parts.append(_esc(sb["urgency"]))
         if sb.get("location"):
-            sb_meta_parts.append(f"Location: {sb['location']}")
+            sb_meta_parts.append(f"Location: {_esc(sb['location'])}")
         sb_meta = " &nbsp;·&nbsp; ".join(sb_meta_parts)
 
         urgent_html = ""
@@ -201,12 +207,12 @@ def format_digest_html(digest: dict, logo_src: str = "") -> str:
         <div style="width:36px;height:36px;border-radius:50%;background:{badge_color};text-align:center;line-height:36px;font-size:16px;">{badge_icon}</div>
       </td>
       <td>
-        <div style="font-size:20px;font-weight:600;color:#3e3f3a;">{sb.get("vintage")} {sb.get("wine")}</div>
+        <div style="font-size:20px;font-weight:600;color:#3e3f3a;">{_esc(sb.get("vintage"))} {_esc(sb.get("wine"))}</div>
         <div style="color:#8e8c84;font-size:14px;margin-top:4px;">{sb_meta}</div>
         {urgent_html}
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid #c5d5e4;">
-          <div style="font-size:14px;color:#3e3f3a;"><strong>Dinner:</strong> {meal}</div>
-          <div style="color:{color};font-size:13px;margin-top:3px;">{status_icon} Planned wine is a {score} match — the sommelier suggests this instead</div>
+          <div style="font-size:14px;color:#3e3f3a;"><strong>Dinner:</strong> {_esc(meal)}</div>
+          <div style="color:{color};font-size:13px;margin-top:3px;">{status_icon} Planned wine is a {_esc(score)} match — the sommelier suggests this instead</div>
         </div>
       </td>
     </tr></table>
@@ -225,7 +231,7 @@ def format_digest_html(digest: dict, logo_src: str = "") -> str:
   <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#325d88;font-weight:600;margin-bottom:10px;">🍽 Tonight's Dinner</div>
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f7e6;border-radius:8px;border:1px solid #c5dba8;">
   <tr><td style="padding:16px 20px;">
-    <div style="font-size:16px;font-weight:500;">{meal}</div>
+    <div style="font-size:16px;font-weight:500;">{_esc(meal)}</div>
     <div style="color:#5cb85c;font-size:13px;margin-top:4px;">{status_icon} The planned wine pairs well — no swap needed</div>
   </td></tr>
   </table>
@@ -242,16 +248,16 @@ def format_digest_html(digest: dict, logo_src: str = "") -> str:
 
         meta_parts = []
         if wine.get("window"):
-            meta_parts.append(f"Window: {wine['window']}")
+            meta_parts.append(f"Window: {_esc(wine['window'])}")
         if wine.get("score"):
-            meta_parts.append(f"Score: {wine['score']}")
+            meta_parts.append(f"Score: {_esc(wine['score'])}")
         if wine.get("location"):
-            meta_parts.append(f"Location: {wine['location']}")
+            meta_parts.append(f"Location: {_esc(wine['location'])}")
         meta_html = " &nbsp;·&nbsp; ".join(meta_parts)
 
         note_html = ""
         if wine.get("note"):
-            note_html = f'<div style="color:#3e3f3a;font-size:14px;margin-top:8px;line-height:1.5;font-style:italic;">{wine["note"]}</div>'
+            note_html = f'<div style="color:#3e3f3a;font-size:14px;margin-top:8px;line-height:1.5;font-style:italic;">{_esc(wine["note"])}</div>'
 
         wine_html = f"""
 <tr><td style="padding:20px 32px 0;">
@@ -263,7 +269,7 @@ def format_digest_html(digest: dict, logo_src: str = "") -> str:
         <div style="width:28px;height:28px;border-radius:50%;background:{badge_color};text-align:center;line-height:28px;font-size:13px;">{badge_icon}</div>
       </td>
       <td>
-        <div style="font-size:16px;font-weight:600;color:#3e3f3a;">{wine["vintage"]} {wine["name"]}</div>
+        <div style="font-size:16px;font-weight:600;color:#3e3f3a;">{_esc(wine["vintage"])} {_esc(wine["name"])}</div>
         <div style="color:#8e8c84;font-size:13px;margin-top:3px;">{meta_html}</div>
         {urgent_html}
         {note_html}
