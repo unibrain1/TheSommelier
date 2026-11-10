@@ -165,7 +165,16 @@ fi
 # Build new plan in DATA_DIR first, only publish to SITE_DIR when the run completes
 STEP="plan"
 log "==> Generating plan..."
-python3 scripts/generate_plan.py "${DATA_DIR}/inventory.json" "${DATA_DIR}/plan.json" || { log "ERROR: Plan generation failed"; exit 1; }
+# Exit 3: the plan is written, but the live plan was bad. generate_plan.py
+# names the cause.
+PLAN_RC=0
+python3 scripts/generate_plan.py "${DATA_DIR}/inventory.json" "${DATA_DIR}/plan.json" || PLAN_RC=$?
+if [[ ${PLAN_RC} -eq 3 ]]; then
+  warn "Plan generation could not use the previous plan — changelog history or reused notes lost"
+elif [[ ${PLAN_RC} -ne 0 ]]; then
+  log "ERROR: Plan generation failed"
+  exit 1
+fi
 
 # --- GENERATE NOTES (LLM — Claude Code CLI, augmented with CT notes) ---
 STEP="notes"

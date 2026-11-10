@@ -11,6 +11,12 @@ The run drops each changelog history entry with a bad shape.
 
 Usage:
     python3 scripts/generate_plan.py "$DATA_DIR/inventory.json" "$DATA_DIR/plan.json"
+
+Exit codes:
+    0  the plan is written. No live plan at all is a first run, not a problem.
+    1  no plan is written
+    3  the plan is written, but the live plan could not be read, had no usable
+       allWeeks list, or lost changelog history entries
 """
 
 import json
@@ -1018,11 +1024,14 @@ def main() -> None:
     old_weeks: list[dict] | None = None
     old_history: list[dict] = []
     old_data = None
+    # True when the live plan exists but its history or notes are lost.
+    previous_lost = False
     if live_plan_path.exists():
         try:
             old_data = json.loads(live_plan_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
-            print(f"Warning: could not read existing plan ({exc})", file=sys.stderr)
+            print(f"WARNING: could not read existing plan ({exc})", file=sys.stderr)
+            previous_lost = True
     else:
         print(f"Note: no live plan at {live_plan_path}, changelog history starts empty")
     if old_data is not None:
@@ -1032,10 +1041,11 @@ def main() -> None:
         old_weeks = usable_weeks(weeks)
         if old_weeks is None:
             print(
-                "Warning: existing plan has no usable allWeeks list, "
+                "WARNING: existing plan has no usable allWeeks list, "
                 "so the run uses no previous plan and no changelog history",
                 file=sys.stderr,
             )
+            previous_lost = True
         else:
             history = old_data.get("changelogHistory") or []
             old_history = usable_history(history)
@@ -1044,10 +1054,11 @@ def main() -> None:
             )
             if dropped:
                 print(
-                    f"Warning: dropped {dropped} changelog history entries "
+                    f"WARNING: dropped {dropped} changelog history entries "
                     "with a bad shape from the existing plan",
                     file=sys.stderr,
                 )
+                previous_lost = True
         try:
             previous_path.parent.mkdir(parents=True, exist_ok=True)
             previous_path.write_text(
@@ -1099,6 +1110,9 @@ def main() -> None:
     print(
         f"  Notes: {reused} reused from the previous plan, {no_note} weeks have no note"
     )
+    if previous_lost:
+        # pipeline.sh counts exit 3 as a warning and goes on with this plan.
+        sys.exit(3)
 
 
 if __name__ == "__main__":

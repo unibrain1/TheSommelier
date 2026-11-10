@@ -133,6 +133,8 @@ If N is greater than 0, the ping lists each warning line below the count. The wa
 
 When some weeks get no tasting note, the log names those weeks, and the run counts a warning. When no note is made, the note step fails, the run counts a warning, and the sync publishes the plan with no new notes.
 
+When the live `plan.json` cannot be read, has no usable week list, or has changelog history entries with a bad shape, the sync builds the plan without that data. Then the changelog history or the reused notes are lost, and the run counts the warning "Plan generation could not use the previous plan". No live plan at all is a first run, and it adds no warning.
+
 When Claude enriches some menu entries but not all, the run counts the warning "Menu enrichment incomplete". When Claude enriches no entry that needs it, or the enrichment files cannot be written, the run counts the warning "Menu enrichment failed". In both cases, pairing uses keyword matching for each meal that has no enrichment. A menu with all entries in the cache needs no Claude call and adds no warning.
 
 A failed run sends the body `Pipeline failed at step: <step>. Check container logs for details.` The step name is one of a fixed set, such as `settings`, `fetch`, `parse`, `plan`, `compare`, `pairing` or `publish`. The body holds no secret.

@@ -151,6 +151,46 @@ class TestGeneratePlanPaths:
         new_plan = json.loads(out.read_text(encoding="utf-8"))
         assert any(e.get("marker") == "LIVE-MARK" for e in new_plan["changelogHistory"])
 
+    @pytest.mark.parametrize(
+        ("content", "message"),
+        [
+            ("{not json", "WARNING: could not read existing plan"),
+            ("[1, 2, 3]", "WARNING: existing plan has no usable allWeeks list"),
+            (
+                json.dumps({"allWeeks": [], "changelogHistory": ["entry"]}),
+                "WARNING: dropped 1 changelog history entries",
+            ),
+        ],
+        ids=["not-json", "no-weeks", "bad-history"],
+    )
+    def test_main_exits_3_when_the_live_plan_is_lost(
+        self, dirs, generate_plan, monkeypatch, capsys, content, message
+    ):
+        (dirs.site / "plan.json").write_text(content, encoding="utf-8")
+        inv = dirs.root / "inventory.json"
+        inv.write_text(json.dumps(inventory()), encoding="utf-8")
+        out = dirs.root / "out.json"
+        monkeypatch.setattr(sys, "argv", ["generate_plan.py", str(inv), str(out)])
+
+        with pytest.raises(SystemExit) as exc:
+            generate_plan.main()
+
+        assert exc.value.code == 3
+        assert message in capsys.readouterr().err
+        assert len(json.loads(out.read_text(encoding="utf-8"))["allWeeks"]) == 52
+
+    def test_main_with_a_good_live_plan_exits_0(self, dirs, generate_plan, monkeypatch):
+        live = {"allWeeks": [], "changelogHistory": []}
+        (dirs.site / "plan.json").write_text(json.dumps(live), encoding="utf-8")
+        inv = dirs.root / "inventory.json"
+        inv.write_text(json.dumps(inventory()), encoding="utf-8")
+        out = dirs.root / "out.json"
+        monkeypatch.setattr(sys, "argv", ["generate_plan.py", str(inv), str(out)])
+
+        generate_plan.main()
+
+        assert out.exists()
+
     def test_load_community_notes_reads_data_dir(self, dirs, generate_plan):
         assert generate_plan._load_community_notes() is None
         notes = {"123": [{"iNote": "9", "body": "from-data-dir"}]}
