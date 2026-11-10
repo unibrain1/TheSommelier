@@ -1224,6 +1224,57 @@ def test_changelog_history_that_is_not_a_list_is_dropped(harness, history):
     assert isinstance(plan["changelogHistory"], list)
 
 
+def test_claude_failing_after_a_run_asks_only_for_the_blank_note(harness):
+    token = {"CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c"}
+    first = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **token,
+            "PATH": _stub_claude_notes(harness.root) + os.pathsep + harness.path,
+        },
+        drop=MENU_OFF,
+    )
+    assert first.returncode == 0, _output(first)
+    plan_path = Path(harness.env["SITE_DIR"]) / "plan.json"
+    plan = json.loads(plan_path.read_text())
+    # reuse_notes() gives the notes of one wine to its weeks in week order.
+    # With the note of the last week of a wine blank, each other week of that
+    # wine keeps its own note.
+    first_wine = plan["allWeeks"][0]
+    blank = [
+        w
+        for w in plan["allWeeks"]
+        if (w["vintage"], w["name"]) == (first_wine["vintage"], first_wine["name"])
+    ][-1]
+    blank["note"] = ""
+    plan_path.write_text(json.dumps(plan))
+    before = {w["week"]: w["note"] for w in plan["allWeeks"]}
+
+    second = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **token,
+            **_enable_healthcheck(harness),
+            "PATH": _stub_claude(harness.root) + os.pathsep + harness.path,
+        },
+        drop=MENU_OFF,
+    )
+
+    assert second.returncode == 0, _output(second)
+    assert (
+        "- WARNING: Note generation failed — new weeks have no note"
+        in (_warning_lines(harness.server.posts[0][1])[1])
+    )
+    assert "Generating notes for 1 entries..." in second.stdout
+    assert "Notes: 51 reused from the previous plan, 1 weeks have no note" in (
+        second.stdout
+    )
+    after = {
+        w["week"]: w["note"] for w in json.loads(plan_path.read_text())["allWeeks"]
+    }
+    assert after == before
+
+
 def test_unreadable_live_plan_is_listed_in_the_success_ping(harness):
     site = Path(harness.env["SITE_DIR"])
     site.mkdir(parents=True, exist_ok=True)
