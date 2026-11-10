@@ -523,7 +523,7 @@ def test_degraded_run_success_ping_counts_and_lists_warnings(harness):
     assert count == len(listed)
     assert count >= 2
     assert any(s.startswith("- WARNING: digest is off.") for s in listed), body
-    assert "- WARNING: Note generation failed — plan will have empty notes" in lines
+    assert "- WARNING: Note generation failed — new weeks have no note" in lines
     assert "Pipeline completed successfully." in body
     for secret in (KEY_CANARY, "key-canary-9d2c", FAKE_PASSWORD):
         assert secret not in body
@@ -1041,7 +1041,9 @@ def test_partial_notes_count_as_incomplete(harness):
     assert result.returncode == 0, _output(result)
     assert "notes missing: weeks 2, 3," in result.stderr
     lines = harness.server.posts[0][1].splitlines()
-    assert "- WARNING: Note generation incomplete — plan has empty notes" in lines
+    assert (
+        "- WARNING: Note generation incomplete — some new weeks have no note" in lines
+    )
 
 
 def test_plan_failure_names_the_plan_step(harness):
@@ -1114,6 +1116,122 @@ def test_complete_notes_add_no_note_warning(harness):
     assert count == len(listed) == 1, body
     assert listed[0].startswith("- WARNING: HEALTHCHECK_URL uses http."), body
     assert "key-canary-9d2c" not in body
+
+
+def test_second_run_reuses_every_note_with_no_claude_call(harness):
+    folder = Path(_stub_claude_notes(harness.root))
+    calls = harness.root / "claude_calls.log"
+    stub = folder / "claude"
+    stub.write_text(
+        f"#!/usr/bin/env bash\necho call >> '{calls}'\ncat '{folder / 'reply.json'}'\n"
+    )
+    extra = {
+        "PATH": str(folder) + os.pathsep + harness.path,
+        "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+    }
+
+    first = harness.run("fetch_docker.sh", extra=extra, drop=MENU_OFF)
+    assert first.returncode == 0, _output(first)
+    assert calls.read_text().count("call") > 0
+    calls.write_text("")
+
+    second = harness.run("fetch_docker.sh", extra=extra, drop=MENU_OFF)
+
+    assert second.returncode == 0, _output(second)
+    assert calls.read_text() == ""
+    assert "Notes: 52 reused from the previous plan, 0 weeks have no note" in (
+        second.stdout
+    )
+    assert "All entries already have notes." in second.stdout
+    plan = json.loads((Path(harness.env["SITE_DIR"]) / "plan.json").read_text())
+    assert [w["week"] for w in plan["allWeeks"] if not w["note"]] == []
+
+
+# usable_weeks() has its own unit tests. These two cases check the main() path.
+@pytest.mark.parametrize(
+    "content", ["[1, 2, 3]", '{"allWeeks": [{"week": "1", "note": "Old note."}]}']
+)
+def test_bad_shape_live_plan_is_replaced(harness, content):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "plan.json").write_text(content)
+
+    result = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert result.returncode == 0, _output(result)
+    assert "existing plan has no usable allWeeks list" in result.stderr
+    assert "Notes: 0 reused from the previous plan, 52 weeks have no note" in (
+        result.stdout
+    )
+    plan = json.loads((site / "plan.json").read_text())
+    assert len(plan["allWeeks"]) == 52
+
+
+def test_bad_changelog_history_in_live_plan_is_dropped(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "plan.json").write_text(
+        json.dumps(
+            {
+                "allWeeks": [],
+                "changelogHistory": [
+                    "entry",
+                    {"date": 5, "changes": []},
+                    {"date": "2099-01-01", "changes": 5},
+                ],
+            }
+        )
+    )
+
+    result = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert result.returncode == 0, _output(result)
+    assert "dropped 3 changelog history entries" in result.stderr
+    plan = json.loads((site / "plan.json").read_text())
+    for entry in plan["changelogHistory"]:
+        assert isinstance(entry["date"], str)
+        assert isinstance(entry["changes"], list)
+
+
+@pytest.mark.parametrize("history", [5, "history"])
+def test_changelog_history_that_is_not_a_list_is_dropped(harness, history):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "plan.json").write_text(
+        json.dumps({"allWeeks": [], "changelogHistory": history})
+    )
+
+    result = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert result.returncode == 0, _output(result)
+    assert "dropped 1 changelog history entries" in result.stderr
+    plan = json.loads((site / "plan.json").read_text())
+    assert isinstance(plan["changelogHistory"], list)
+
+
+def test_run_with_claude_off_keeps_the_notes_of_the_last_run(harness):
+    folder = _stub_claude_notes(harness.root)
+    first = harness.run(
+        "fetch_docker.sh",
+        extra={
+            "PATH": folder + os.pathsep + harness.path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+        drop=MENU_OFF,
+    )
+    assert first.returncode == 0, _output(first)
+
+    second = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert second.returncode == 0, _output(second)
+    assert "Generating tasting notes" not in second.stdout
+    assert "Notes: 52 reused from the previous plan, 0 weeks have no note" in (
+        second.stdout
+    )
+    plan = json.loads((Path(harness.env["SITE_DIR"]) / "plan.json").read_text())
+    assert [w["note"] for w in plan["allWeeks"]] == [
+        f"A fine note for week {w['week']}." for w in plan["allWeeks"]
+    ]
 
 
 def test_claude_on_without_cli_lists_both_skip_warnings(harness):
