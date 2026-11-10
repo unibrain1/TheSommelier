@@ -45,7 +45,7 @@
 name: the-sommelier
 
 x-sommelier: &sommelier
-  image: ghcr.io/unibrain1/thesommelier:4.0
+  image: ghcr.io/unibrain1/thesommelier:4.1
   # The container runs as this user.
   user: "1000:1000"
   environment:

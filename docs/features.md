@@ -67,6 +67,8 @@ The digest needs the menu feature. When the menu feature is off, the digest has 
 
 Claude writes a short tasting note for each bottle. It also reads the menu text to improve the pairings. A sync keeps a note while the wine and its marks (urgent, evolution and occasion) stay the same. A new score, window, CellarTracker note or community note does not change a kept note. Claude writes a note only for a new or changed week. Without Claude, a week keeps the note of the last plan if it has one. Other weeks have no note, and the pairings use keyword matching.
 
+A note stays while the week keeps the same wine and marks. A week with an empty or missing note gets a new note in the next sync, if Claude is on. To get new notes, remove the `note` values from the live `/data/site/plan.json`. Or delete that file, but this also clears the changelog history.
+
 There are three choices. Set at most one key.
 
 | Choice | Key to set | Keys to leave unset |
@@ -139,7 +141,7 @@ When Claude enriches some menu entries but not all, the run counts the warning "
 
 A failed run sends the body `Pipeline failed at step: <step>. Check container logs for details.` The step name is one of a fixed set, such as `settings`, `fetch`, `parse`, `plan`, `compare`, `pairing` or `publish`. The body holds no secret.
 
-The scheduled digest send (`DIGEST_SEND_SCHEDULE`) also pings `HEALTHCHECK_URL`. It sends a fail ping with the cause when the send fails. It also sends a fail ping when `digest.json` is stale. The file is stale when it is not for today. Then the last sync did not finish, or it did not make a new digest. Healthchecks.io then sends its alert. The next successful sync sends a success ping, and the check returns to up.
+The scheduled digest send (`DIGEST_SEND_SCHEDULE`) also pings `HEALTHCHECK_URL`. It sends a fail ping with the cause when the send fails. It also sends a fail ping when `digest.json` is stale. The file is stale when it is not for today. There are two causes. The last sync did not finish, or it did not make a new digest. Or `DIGEST_SEND_SCHEDULE` fires before the first `SYNC_SCHEDULE` run of the day. The digest schedule must fire after the first sync of the day. The default schedules follow this rule. Healthchecks.io then sends its alert. The next successful sync sends a success ping, and the check returns to up.
 
 A manual run with `--dry-run` or `--force` sends no ping. So does a digest run that reports "Nothing to send", "already sent" or "not configured".
 

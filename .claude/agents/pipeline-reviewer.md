@@ -38,6 +38,7 @@ Verify changes don't violate ordering dependencies.
 - Pipeline should continue if Claude CLI is unavailable (notes step is optional)
 - Scripts should fail loudly on missing input files, not produce empty/corrupt output
 - Publish step must be atomic — don't copy partial results to site/
+- A new or changed pipeline step must use the exit-code rule: 0 complete, 1 failed, 3 partial with the output written. `pipeline.sh` must map exit 3 to `warn`.
 
 ### Shared Utilities
 

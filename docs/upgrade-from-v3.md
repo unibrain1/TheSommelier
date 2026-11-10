@@ -14,7 +14,7 @@ Before v4.0.0 the container ran from a repo checkout on the host. It updated its
    mkdir -p config && chmod 777 config
    docker run --rm --entrypoint python3 -u 1000:1000 \
      -v /path/to/old/checkout/scripts/plan_config.py:/in/plan_config.py:ro \
-     -v "$PWD/config":/out ghcr.io/unibrain1/thesommelier:4.0 \
+     -v "$PWD/config":/out ghcr.io/unibrain1/thesommelier:4.1 \
      /app/scripts/convert_plan_config.py /in/plan_config.py /out
    ```
 

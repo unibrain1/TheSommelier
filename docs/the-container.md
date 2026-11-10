@@ -19,12 +19,12 @@ The image is `ghcr.io/unibrain1/thesommelier`. It runs on amd64 and arm64.
 
 | Tag | Content |
 | --- | --- |
-| `4.0.0` | One exact release. It never changes. |
-| `4.0` | The latest patch release of 4.0. |
+| `4.1.0` | One exact release. It never changes. |
+| `4.1` | The latest patch release of 4.1. |
 | `latest` | The latest release. |
 | `edge` | The latest build of a push to the `main` branch or to a milestone branch, or of a manual run on a branch. It is not a release. |
 
-To keep a fixed version, use `4.0.0`. To get fixes, use `4.0`. Do not use `edge` in production.
+To keep a fixed version, use `4.1.0`. To get fixes, use `4.1`. Do not use `edge` in production.
 
 ### Which version runs
 
