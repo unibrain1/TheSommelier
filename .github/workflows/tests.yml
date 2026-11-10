@@ -1,0 +1,50 @@
+# Runs the test suite on each pull request and on each push to main and to a
+# milestone branch. The docker-tests job builds the image and runs the opt-in
+# tests of tests/test_docker_image.py.
+name: Tests
+on:
+  pull_request:
+  push:
+    branches: [main, "milestone/**"]
+
+permissions:
+  contents: read
+
+# A new push to the same ref cancels the older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The same Python as the base image in the Dockerfile.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      # ubuntu-latest has bash, curl, flock and jq. The e2e tests skip without jq.
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest tests/ -q --tb=short
+
+  docker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements.txt pytest
+      # The tests build the image again under a tag of their own. This build
+      # shows a build failure in its own step and fills the layer cache, so the
+      # build in the tests is fast.
+      - run: docker build -t sommelier-ci .
+      # No SOMMELIER_CLAUDE_TEST_TOKEN: the test that needs it stays skipped.
+      - run: python -m pytest tests/test_docker_image.py -q --tb=short
+        env:
+          SOMMELIER_DOCKER_TESTS: "1"

@@ -37,6 +37,20 @@ bash fetch.sh
 python3 -m http.server -d site 8080
 ```
 
+## Run the tests
+
+```bash
+.venv/bin/python -m pytest tests/ -q --tb=short
+```
+
+The tests in `tests/test_docker_image.py` build and run the image. They take minutes, so they run only when you set `SOMMELIER_DOCKER_TESTS=1` and Docker is running:
+
+```bash
+SOMMELIER_DOCKER_TESTS=1 .venv/bin/python -m pytest tests/test_docker_image.py -q --tb=short
+```
+
+CI runs both on each pull request and on each push to `main` and to a `milestone/**` branch (`.github/workflows/tests.yml`). The test that needs `SOMMELIER_CLAUDE_TEST_TOKEN` stays skipped in CI.
+
 ## Build the image
 
 Build and run the image from the checkout. `docker-compose.yml` has `build: .` and `env_file: .env`:
