@@ -1116,6 +1116,106 @@ def test_complete_notes_add_no_note_warning(harness):
     assert "key-canary-9d2c" not in body
 
 
+def test_second_run_reuses_every_note_with_no_claude_call(harness):
+    folder = Path(_stub_claude_notes(harness.root))
+    calls = harness.root / "claude_calls.log"
+    stub = folder / "claude"
+    stub.write_text(
+        f"#!/usr/bin/env bash\necho call >> '{calls}'\ncat '{folder / 'reply.json'}'\n"
+    )
+    extra = {
+        "PATH": str(folder) + os.pathsep + harness.path,
+        "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+    }
+
+    first = harness.run("fetch_docker.sh", extra=extra, drop=MENU_OFF)
+    assert first.returncode == 0, _output(first)
+    assert calls.read_text().count("call") > 0
+    calls.write_text("")
+
+    second = harness.run("fetch_docker.sh", extra=extra, drop=MENU_OFF)
+
+    assert second.returncode == 0, _output(second)
+    assert calls.read_text() == ""
+    assert "Notes: 52 reused from the previous plan, 0 weeks have no note" in (
+        second.stdout
+    )
+    assert "All entries already have notes." in second.stdout
+    plan = json.loads((Path(harness.env["SITE_DIR"]) / "plan.json").read_text())
+    assert [w["week"] for w in plan["allWeeks"] if not w["note"]] == []
+
+
+# usable_weeks() has its own unit tests. These two cases check the main() path.
+@pytest.mark.parametrize(
+    "content", ["[1, 2, 3]", '{"allWeeks": [{"week": "1", "note": "Old note."}]}']
+)
+def test_bad_shape_live_plan_is_replaced(harness, content):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "plan.json").write_text(content)
+
+    result = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert result.returncode == 0, _output(result)
+    assert "existing plan has no usable allWeeks list" in result.stderr
+    assert "Notes: 0 reused from the previous plan, 52 weeks have no note" in (
+        result.stdout
+    )
+    plan = json.loads((site / "plan.json").read_text())
+    assert len(plan["allWeeks"]) == 52
+
+
+def test_bad_changelog_history_in_live_plan_is_dropped(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "plan.json").write_text(
+        json.dumps(
+            {
+                "allWeeks": [],
+                "changelogHistory": [
+                    "entry",
+                    {"date": 5, "changes": []},
+                    {"date": "2099-01-01", "changes": 5},
+                ],
+            }
+        )
+    )
+
+    result = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert result.returncode == 0, _output(result)
+    assert "dropped 3 changelog history entries" in result.stderr
+    plan = json.loads((site / "plan.json").read_text())
+    for entry in plan["changelogHistory"]:
+        assert isinstance(entry["date"], str)
+        assert isinstance(entry["changes"], list)
+
+
+def test_run_with_claude_off_keeps_the_notes_of_the_last_run(harness):
+    folder = _stub_claude_notes(harness.root)
+    first = harness.run(
+        "fetch_docker.sh",
+        extra={
+            "PATH": folder + os.pathsep + harness.path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+        drop=MENU_OFF,
+    )
+    assert first.returncode == 0, _output(first)
+
+    second = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert second.returncode == 0, _output(second)
+    assert "Generating tasting notes" not in second.stdout
+    assert "Notes: 52 reused from the previous plan, 0 weeks have no note" in (
+        second.stdout
+    )
+    plan = json.loads((Path(harness.env["SITE_DIR"]) / "plan.json").read_text())
+    assert [w["note"] for w in plan["allWeeks"]] == [
+        f"A fine note for week {w['week']}." for w in plan["allWeeks"]
+    ]
+
+
 def test_claude_on_without_cli_lists_both_skip_warnings(harness):
     # harness.path holds no `claude`: the fixture skips the test if it does.
     result = harness.run(

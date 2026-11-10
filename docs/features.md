@@ -65,7 +65,7 @@ The digest needs the menu feature. When the menu feature is off, the digest has 
 
 ## Claude tasting notes and menu enrichment
 
-Claude writes a short tasting note for each bottle. It also reads the menu text to improve the pairings. Without Claude, the notes are empty and the pairings use keyword matching.
+Claude writes a short tasting note for each bottle. It also reads the menu text to improve the pairings. A sync keeps a note while the wine and its marks (urgent, evolution and occasion) stay the same, and a changed score or window does not change the note. Claude writes a note only for a new or changed week. Without Claude, a week keeps the note of the last plan if it has one. Other weeks have no note, and the pairings use keyword matching.
 
 There are three choices. Set at most one key.
 
@@ -75,7 +75,7 @@ There are three choices. Set at most one key.
 | Subscription | `CLAUDE_CODE_OAUTH_TOKEN` | `ANTHROPIC_API_KEY` |
 | API | `ANTHROPIC_API_KEY` | `CLAUDE_CODE_OAUTH_TOKEN` |
 
-If you set both keys, the feature is off. The sync runs without notes and logs a warning that names both keys. Each sync logs the choice: `claude: on (subscription)`, `claude: on (API key)` or `claude: off` with the reason.
+If you set both keys, the feature is off. The sync writes no new notes and logs a warning that names both keys. Each sync logs the choice: `claude: on (subscription)`, `claude: on (API key)` or `claude: off` with the reason.
 
 | Key | Kind | Default |
 | --- | --- | --- |
@@ -90,7 +90,7 @@ For the subscription, the container logs in with a token. The runs use your Clau
 2. Put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN`. Remove the `# ` from its line in `compose.yaml`.
 3. Run `docker compose down && docker compose up -d`.
 
-The token expires one year after you make it. After that, the sync continues with empty notes. Make a new token and replace the value.
+The token expires one year after you make it. After that, the sync continues with no new notes. Make a new token and replace the value.
 
 For the API, put your Anthropic API key in `.env` as `ANTHROPIC_API_KEY`. Remove the `# ` from its line in `compose.yaml`. Then run `docker compose down && docker compose up -d`. The runs go on your API bill.
 
@@ -131,7 +131,7 @@ The sync counts a warning when an optional step fails. Examples are community no
 
 If N is greater than 0, the ping lists each warning line below the count. The warning lines hold no secret values.
 
-When some weeks get no tasting note, the log names those weeks, and the run counts a warning. When no note is made, the note step fails, the run counts a warning, and the sync publishes the plan with empty notes.
+When some weeks get no tasting note, the log names those weeks, and the run counts a warning. When no note is made, the note step fails, the run counts a warning, and the sync publishes the plan with no new notes.
 
 A failed run sends the body `Pipeline failed at step: <step>. Check container logs for details.` The step name is one of a fixed set, such as `settings`, `fetch`, `parse`, `plan`, `compare`, `pairing` or `publish`. The body holds no secret.
 

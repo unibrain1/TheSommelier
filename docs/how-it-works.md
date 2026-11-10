@@ -8,14 +8,14 @@ Each sync runs these steps:
 
 1. Fetch your CellarTracker inventory, notes and food tags, and your Google Calendar menu. The sync fetches the menu only when the menu feature is on.
 2. Build a 52-week plan from drinking windows, seasons, evolution tracks and holidays.
-3. Ask Claude for a short tasting note for each bottle, if Claude is on.
+3. Copy the tasting note of each week from the last plan when the week holds the same wine with the same urgent, evolution and occasion marks. This copy does not need Claude. If Claude is on, ask Claude for a note for each other week.
 4. Compare the plan with your inventory. If the menu feature is on, suggest a pairing for each meal.
 5. Publish the complete plan to the site.
 6. If Home Assistant is on (`HA_ENABLED=true`), write `thisweek.json` and `today.json` for its sensors. If it is off, remove them.
 7. Write the morning digest files. The digest email goes out on its own schedule (`DIGEST_SEND_SCHEDULE`), if the digest feature is on.
 8. If `HEALTHCHECK_URL` is set, ping Healthchecks.io. The success ping shows the warning count. The fail ping names the step that stopped the sync.
 
-The sync builds the plan again from scratch each time. CellarTracker is the source of all wine data. Claude writes the tasting notes. The rules do the rest, so the same cellar on the same day gives the same plan, apart from the Claude notes.
+The sync builds the schedule again from scratch each time. CellarTracker is the source of all wine data. Claude writes the tasting notes. The sync keeps a note while the wine and its marks stay the same, and a changed score or window does not change the note. The rules do the rest, so the same cellar on the same day gives the same plan, apart from the Claude notes.
 
 ## How wines are prioritized
 
