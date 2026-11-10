@@ -1735,6 +1735,20 @@ def test_pipeline_menu_off_digest_is_nothing_to_send(harness):
     assert "Digest generation failed" not in result.stdout
     assert (site / "digest.json").is_file()
     assert (site / "digest.html").is_file()
+    import send_digest
+
+    digest = json.loads((site / "digest.json").read_text())
+    assert digest["date"] == send_digest._today_local()
+
+    # The sync wrote this digest.json, so the scheduled send must not see a
+    # stale digest.
+    sent = harness.run(
+        "send_digest.sh", extra={**digest_env, **_enable_healthcheck(harness)}
+    )
+
+    assert sent.returncode == 0, _output(sent)
+    assert "Nothing to send" in sent.stdout, _output(sent)
+    assert harness.server.posts == []
 
 
 def test_credentials_are_not_in_curl_argv(harness):
