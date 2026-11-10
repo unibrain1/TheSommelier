@@ -5,12 +5,18 @@ For each menu entry, extracts structured food features using Claude.
 Caches results keyed by raw text hash so unchanged entries aren't re-enriched.
 
 Usage: enrich_menu.py <menu.json> [cache.json] [output.json]
+
+Exit codes:
+  0  every entry that needed enrichment was enriched, or all were cached
+  1  no entry that needed enrichment was enriched, or a file write failed
+  3  some, but not all, entries that needed enrichment were enriched
 """
 
 import hashlib
 import json
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import settings
 from wine_utils import call_claude, extract_json
@@ -48,6 +54,17 @@ SCALAR_FIELDS: frozenset[str] = frozenset(
     }
 )
 LIST_FIELDS: frozenset[str] = frozenset(ENRICHED_FIELDS) - SCALAR_FIELDS
+
+
+class EnrichResult(NamedTuple):
+    """The enriched entries, the counts, and whether every file write worked."""
+
+    results: list[dict]
+    needed: int
+    enriched: int
+    written: bool
+
+
 # The values that build_enrichment_prompt asks for.
 ENUM_VALUES: dict[str, frozenset[str]] = {
     "sauce_intensity": frozenset({"light", "medium", "heavy"}),
@@ -202,8 +219,12 @@ def _validate_enriched(enriched: object) -> dict | None:
 
 def enrich_menu(
     menu_path: Path, cache_path: Path, output_path: Path | None = None
-) -> list[dict]:
-    """Enrich menu entries with LLM-extracted food features."""
+) -> EnrichResult:
+    """Enrich menu entries with LLM-extracted food features.
+
+    Return the entries, how many needed enrichment, how many got it, and
+    whether the files were written.
+    """
     menu = json.loads(menu_path.read_text(encoding="utf-8"))
     cache = load_cache(cache_path)
 
@@ -223,8 +244,8 @@ def enrich_menu(
 
     if not to_enrich:
         print(f"Menu enrichment: all {len(menu)} entries cached, nothing to enrich.")
-        _write_files(results, cache, cache_path, output_path)
-        return results
+        written = _write_files(results, cache, cache_path, output_path)
+        return EnrichResult(results, needed=0, enriched=0, written=written)
 
     cache_hits = len(menu) - len(to_enrich)
     print(f"Menu enrichment: {cache_hits} cached, {len(to_enrich)} to enrich...")
@@ -235,9 +256,12 @@ def enrich_menu(
     response = call_claude(prompt)
 
     if not response:
-        print("WARNING: Empty response from Claude — all entries unenriched")
-        _write_files(results, cache, cache_path, output_path)
-        return results
+        print(
+            "WARNING: Empty response from Claude — all entries unenriched",
+            file=sys.stderr,
+        )
+        written = _write_files(results, cache, cache_path, output_path)
+        return EnrichResult(results, needed=len(to_enrich), enriched=0, written=written)
 
     enrichments = extract_json(response)
 
@@ -256,8 +280,10 @@ def enrich_menu(
 
     print(f"  Enriched {enriched_count}/{len(to_enrich)} entries.")
 
-    _write_files(results, cache, cache_path, output_path)
-    return results
+    written = _write_files(results, cache, cache_path, output_path)
+    return EnrichResult(
+        results, needed=len(to_enrich), enriched=enriched_count, written=written
+    )
 
 
 def _write_files(
@@ -265,12 +291,13 @@ def _write_files(
     cache: dict[str, dict],
     cache_path: Path,
     output_path: Path | None = None,
-) -> None:
-    """Write cache and full results atomically."""
+) -> bool:
+    """Write cache and full results atomically. Return False if a write failed."""
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     files: list[tuple[Path, list | dict]] = [(cache_path, cache)]
     if output_path:
         files.append((output_path, results))
+    written = True
     for path, data in files:
         tmp = path.with_suffix(".tmp")
         try:
@@ -281,26 +308,49 @@ def _write_files(
         except OSError as e:
             print(f"ERROR: Failed to write {path}: {e}", file=sys.stderr)
             tmp.unlink(missing_ok=True)
+            written = False
+    return written
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
+def main(argv: list[str]) -> int:
+    """Run the script and return its exit code (see the module docstring)."""
+    if len(argv) < 2:
         print(
             "Usage: enrich_menu.py <menu.json> [cache.json] [output.json]",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return 1
 
-    menu_path = Path(sys.argv[1])
+    menu_path = Path(argv[1])
     cache_path = (
-        Path(sys.argv[2])
-        if len(sys.argv) > 2
-        else settings.data_dir() / "menu_enriched.json"
+        Path(argv[2]) if len(argv) > 2 else settings.data_dir() / "menu_enriched.json"
     )
     output_path = (
-        Path(sys.argv[3])
-        if len(sys.argv) > 3
+        Path(argv[3])
+        if len(argv) > 3
         else settings.data_dir() / "menu_enriched_full.json"
     )
 
-    enrich_menu(menu_path, cache_path, output_path)
+    result = enrich_menu(menu_path, cache_path, output_path)
+    if not result.written:
+        return 1
+    if result.enriched == result.needed:
+        return 0
+    if result.enriched == 0:
+        print(
+            f"ERROR: No menu entries enriched of {result.needed}",
+            file=sys.stderr,
+        )
+        return 1
+    # Exit 3 is a partial result. pipeline.sh treats each other non-zero code
+    # as a failed enrichment step.
+    print(
+        f"WARNING: {result.needed - result.enriched} of {result.needed} "
+        "menu entries not enriched",
+        file=sys.stderr,
+    )
+    return 3
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

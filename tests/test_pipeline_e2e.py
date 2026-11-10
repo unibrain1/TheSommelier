@@ -1234,6 +1234,28 @@ def test_run_with_claude_off_keeps_the_notes_of_the_last_run(harness):
     ]
 
 
+def test_failed_menu_enrichment_is_listed_in_the_success_ping(harness):
+    path = _stub_claude(harness.root) + os.pathsep + harness.path
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "WARNING: Empty response from Claude" in result.stderr
+    count, listed = _warning_lines(harness.server.posts[0][1])
+    assert count == len(listed)
+    assert (
+        "- WARNING: Menu enrichment failed — pairing will use keyword matching only"
+        in listed
+    )
+
+
 def test_claude_on_without_cli_lists_both_skip_warnings(harness):
     # harness.path holds no `claude`: the fixture skips the test if it does.
     result = harness.run(

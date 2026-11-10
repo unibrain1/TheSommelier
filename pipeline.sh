@@ -204,7 +204,14 @@ if [[ ${MENU_ON} -eq 1 ]]; then
     warn "Skipping menu enrichment — claude CLI not available"
   else
     log "==> Enriching menu entries (Claude)..."
-    python3 scripts/enrich_menu.py "${DATA_DIR}/menu.json" "${DATA_DIR}/menu_enriched.json" "${DATA_DIR}/menu_enriched_full.json" || warn "Menu enrichment failed — pairing will use keyword matching only"
+    # Exit 3: some menu entries are not enriched. enrich_menu.py counts them.
+    ENRICH_RC=0
+    python3 scripts/enrich_menu.py "${DATA_DIR}/menu.json" "${DATA_DIR}/menu_enriched.json" "${DATA_DIR}/menu_enriched_full.json" || ENRICH_RC=$?
+    if [[ ${ENRICH_RC} -eq 3 ]]; then
+      warn "Menu enrichment incomplete — some meals use keyword matching only"
+    elif [[ ${ENRICH_RC} -ne 0 ]]; then
+      warn "Menu enrichment failed — pairing will use keyword matching only"
+    fi
   fi
 
   STEP="pairing"

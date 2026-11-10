@@ -133,6 +133,8 @@ If N is greater than 0, the ping lists each warning line below the count. The wa
 
 When some weeks get no tasting note, the log names those weeks, and the run counts a warning. When no note is made, the note step fails, the run counts a warning, and the sync publishes the plan with no new notes.
 
+When Claude enriches some menu entries but not all, the run counts the warning "Menu enrichment incomplete". When Claude enriches no entry that needs it, or the enrichment files cannot be written, the run counts the warning "Menu enrichment failed". In both cases, pairing uses keyword matching for each meal that has no enrichment. A menu with all entries in the cache needs no Claude call and adds no warning.
+
 A failed run sends the body `Pipeline failed at step: <step>. Check container logs for details.` The step name is one of a fixed set, such as `settings`, `fetch`, `parse`, `plan`, `compare`, `pairing` or `publish`. The body holds no secret.
 
 The scheduled digest send (`DIGEST_SEND_SCHEDULE`) also pings `HEALTHCHECK_URL`. It sends a fail ping with the cause when the send fails. It also sends a fail ping when `digest.json` is stale. The file is stale when it is not for today. Then the last sync did not finish, or it did not make a new digest. Healthchecks.io then sends its alert. The next successful sync sends a success ping, and the check returns to up.

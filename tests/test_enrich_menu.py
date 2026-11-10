@@ -3,11 +3,14 @@
 import json
 from unittest.mock import patch
 
+import pytest
+
 from enrich_menu import (
     _validate_enriched,
     build_enrichment_prompt,
     enrich_menu,
     load_cache,
+    main,
     text_hash,
 )
 from wine_utils import extract_json
@@ -298,7 +301,7 @@ class TestEnrichMenuRepairsCache:
         )
 
         with patch("enrich_menu.call_claude", return_value="") as mock_claude:
-            results = enrich_menu(menu_path, cache_path)
+            results = enrich_menu(menu_path, cache_path).results
         # The entry with no usable field is enriched again, the repaired one is not.
         mock_claude.assert_called_once()
         assert bad_text in mock_claude.call_args.args[0]
@@ -353,7 +356,7 @@ class TestEnrichMenuRepairsCache:
         reply = json.dumps({"0": "pork", "1": {"richness": "extreme"}})
 
         with patch("enrich_menu.call_claude", return_value=reply):
-            results = enrich_menu(menu_path, cache_path)
+            results = enrich_menu(menu_path, cache_path).results
 
         assert json.loads(cache_path.read_text(encoding="utf-8")) == {}
         assert [r["enriched"] for r in results] == [None, None]
@@ -405,3 +408,91 @@ class TestEnrichMenuNormalizesBeforeCache:
         assert entry["sides"] == ["potatoes", "kale"], (
             f"Expected sides array preserved, got {entry['sides']!r}"
         )
+
+
+def _write_menu(path, meals):
+    path.write_text(
+        json.dumps(
+            [{"date": f"2026-06-0{i + 1}", "meal": m} for i, m in enumerate(meals)]
+        ),
+        encoding="utf-8",
+    )
+
+
+class TestMainExitCode:
+    """main() returns 0, 1 or 3 so that pipeline.sh can count a warning."""
+
+    def _run(self, tmp_path, reply):
+        menu_path = tmp_path / "menu.json"
+        _write_menu(menu_path, ["Pork chop", "Salmon"])
+        args = [
+            "enrich_menu.py",
+            str(menu_path),
+            str(tmp_path / "cache.json"),
+            str(tmp_path / "full.json"),
+        ]
+        with patch("enrich_menu.call_claude", return_value=reply):
+            return main(args)
+
+    def test_all_entries_enriched_returns_0(self, tmp_path, capsys):
+        reply = json.dumps({"0": {"protein": "pork"}, "1": {"protein": "salmon"}})
+        assert self._run(tmp_path, reply) == 0
+        assert "ERROR" not in capsys.readouterr().err
+
+    def test_all_entries_cached_returns_0(self, tmp_path):
+        menu_path = tmp_path / "menu.json"
+        cache_path = tmp_path / "cache.json"
+        _write_menu(menu_path, ["Pork chop"])
+        cache_path.write_text(
+            json.dumps({text_hash("Pork chop"): {"protein": "pork"}}), encoding="utf-8"
+        )
+        with patch("enrich_menu.call_claude") as mock_claude:
+            assert (
+                main(
+                    [
+                        "enrich_menu.py",
+                        str(menu_path),
+                        str(cache_path),
+                        str(tmp_path / "full.json"),
+                    ]
+                )
+                == 0
+            )
+        mock_claude.assert_not_called()
+
+    def test_some_entries_enriched_returns_3(self, tmp_path, capsys):
+        reply = json.dumps({"0": {"protein": "pork"}, "1": {"richness": "extreme"}})
+        assert self._run(tmp_path, reply) == 3
+        assert "WARNING: 1 of 2 menu entries not enriched" in capsys.readouterr().err
+
+    def test_empty_reply_returns_1(self, tmp_path, capsys):
+        assert self._run(tmp_path, "") == 1
+        err = capsys.readouterr().err
+        assert "WARNING: Empty response from Claude" in err
+        assert "ERROR: No menu entries enriched of 2" in err
+
+    def test_reply_with_no_usable_entry_returns_1(self, tmp_path, capsys):
+        reply = json.dumps({"0": "pork", "1": {"richness": "extreme"}})
+        assert self._run(tmp_path, reply) == 1
+        assert "ERROR: No menu entries enriched of 2" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("reply", ["", json.dumps({"0": {"protein": "pork"}})])
+    def test_write_failure_returns_1(self, tmp_path, capsys, reply):
+        menu_path = tmp_path / "menu.json"
+        _write_menu(menu_path, ["Pork chop"])
+        # A folder at the cache path makes the atomic replace fail.
+        cache_path = tmp_path / "cache.json"
+        cache_path.mkdir()
+        with patch("enrich_menu.call_claude", return_value=reply):
+            assert (
+                main(
+                    [
+                        "enrich_menu.py",
+                        str(menu_path),
+                        str(cache_path),
+                        str(tmp_path / "full.json"),
+                    ]
+                )
+                == 1
+            )
+        assert "ERROR: Failed to write" in capsys.readouterr().err
