@@ -25,7 +25,7 @@ warn() {
 STEP="settings"
 
 # Send failure ping on any non-zero exit. EXIT, not ERR: each step stops the
-# run with its own `|| { ...; exit 1; }`, and an explicit exit does not fire ERR.
+# run with an explicit `exit 1`, and an explicit exit does not fire ERR.
 ping_on_failure() {
   local rc=$?
   if [[ ${rc} -ne 0 ]]; then
@@ -219,7 +219,7 @@ if [[ ${MENU_ON} -eq 1 ]]; then
     if [[ ${ENRICH_RC} -eq 3 ]]; then
       warn "Menu enrichment incomplete — some meals use keyword matching only"
     elif [[ ${ENRICH_RC} -ne 0 ]]; then
-      warn "Menu enrichment failed — pairing will use keyword matching only"
+      warn "Menu enrichment failed — some or all meals use keyword matching only"
     fi
   fi
 

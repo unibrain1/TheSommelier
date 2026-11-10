@@ -1065,11 +1065,12 @@ def _stub_claude(root: Path) -> str:
     return _stub_bin(root, "claude", 1)
 
 
-def _stub_claude_notes(root: Path) -> str:
+def _stub_claude_notes(root: Path, extra: dict | None = None) -> str:
     """Return a PATH folder that holds a `claude` with a note for weeks 1 to 60.
 
     generate_notes.py skips a key that is not a week of the batch, so one reply
     serves every batch. The stub also answers enrich_menu.py with this text.
+    `extra` adds keys to the reply, for example an enrichment for entry "0".
     """
     folder = root / "notesbin"
     folder.mkdir()
@@ -1077,6 +1078,7 @@ def _stub_claude_notes(root: Path) -> str:
     reply.write_text(
         json.dumps(
             {str(week): f"A fine note for week {week}." for week in range(1, 61)}
+            | (extra or {})
         )
     )
     stub = folder / "claude"
@@ -1344,9 +1346,35 @@ def test_failed_menu_enrichment_is_listed_in_the_success_ping(harness):
     count, listed = _warning_lines(harness.server.posts[0][1])
     assert count == len(listed)
     assert (
-        "- WARNING: Menu enrichment failed — pairing will use keyword matching only"
+        "- WARNING: Menu enrichment failed — some or all meals use keyword matching only"
         in listed
     )
+
+
+def test_incomplete_menu_enrichment_is_listed_in_the_success_ping(harness):
+    # The menu fixture has two meals and the cache is empty. The reply enriches
+    # entry "0" only. Its key "1" is a week note, not a usable enrichment.
+    extra = {"0": {"protein": "beef"}}
+    path = _stub_claude_notes(harness.root, extra) + os.pathsep + harness.path
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "WARNING: 1 of 2 menu entries not enriched" in result.stderr
+    count, listed = _warning_lines(harness.server.posts[0][1])
+    assert count == len(listed)
+    assert (
+        "- WARNING: Menu enrichment incomplete — some meals use keyword matching only"
+        in listed
+    )
+    assert not any("Menu enrichment failed" in line for line in listed)
 
 
 def test_claude_on_without_cli_lists_both_skip_warnings(harness):
