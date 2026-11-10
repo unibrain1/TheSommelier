@@ -127,7 +127,7 @@ Healthchecks.io accepts only one cron expression. The 22:00 run sends one extra 
 
 The success ping body starts with `Pipeline completed successfully.` It has the `Bottles`, `Weeks planned` and `Time` lines. It has a line `Warnings: N`, where N is the number of warnings in the run.
 
-The sync counts a warning when an optional step fails. Examples are community notes, tasting notes, menu enrichment, the Home Assistant JSON files and digest generation. The sync also counts each `WARNING:` line of the settings check. An example is a feature that is off because some of its settings are missing or not valid. A feature with no settings at all adds no warning.
+The sync counts a warning when an optional step fails. Examples are community notes, tasting notes, menu enrichment, the Home Assistant JSON files and digest generation. The sync also counts each `WARNING:` line of the settings check. An example is a feature that is off because some of its settings are missing or not valid. A feature with no settings at all adds a warning only when its flag has a value that is not valid.
 
 If N is greater than 0, the ping lists each warning line below the count. The warning lines hold no secret values.
 

@@ -31,6 +31,8 @@ Two compose files:
 
 `.github/workflows/publish-image.yml` builds the image for amd64 and arm64. A `vX.Y.Z` tag pushes `X.Y.Z`, `X.Y` and `latest`. A push to `main` or to a `milestone/**` branch pushes `edge`. A manual run needs the workflow file on `main`, and a manual run on a branch also pushes `edge`. A manual run on a tag fails, because only a version tag push can write a release tag. A pull request that changes an image file builds only. A prerelease tag (with `-`) does not push `latest`.
 
+`.github/workflows/tests.yml` runs pytest on each pull request and on a push to `main` or `milestone/**`. A second job builds the image and runs `tests/test_docker_image.py` with `SOMMELIER_DOCKER_TESTS=1`.
+
 The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set, or is not an `http://` or `https://` URL, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
 The image holds the code. The container runs no `git` and no `pip install`. It does not update itself.
