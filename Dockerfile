@@ -51,6 +51,12 @@ COPY . /app
 # A new named volume copies the owner of /data on first use, so the volume is writable with no init step.
 RUN mkdir -p /data/site /config && chown 1000:1000 /data /data/site
 
+# The value changes at each build, so this layer comes after the layers that can stay cached.
+# The workflow passes X.Y.Z or edge-<sha>. A local build passes no value, so the footer shows dev.
+# json.dump writes the value, so a quote in a tag name cannot break the JSON.
+ARG APP_VERSION=dev
+RUN python3 -c 'import json, sys; json.dump({"version": sys.argv[1]}, open("/app/site/version.json", "w"))' "${APP_VERSION}"
+
 # Numeric form of the user above, so the host can resolve it (DL3066)
 USER 1000:1000
 

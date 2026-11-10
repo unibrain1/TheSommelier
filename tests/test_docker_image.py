@@ -5,6 +5,7 @@ command skips this file. Each run uses its own image tag, container names and
 volume name, and removes them at the end.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -200,6 +201,15 @@ def test_site_serves_index_from_image_and_plan_from_volume(sandbox, running):
     assert root.stdout == index.stdout
     assert plan.returncode == 0
     assert plan.stdout.strip() == '{"seeded": true}'
+
+
+def test_site_serves_the_dev_version_of_a_local_build(running):
+    name, _ = running
+
+    version = _exec(name, "curl", "-sf", "http://127.0.0.1:8080/version.json")
+
+    assert version.returncode == 0
+    assert json.loads(version.stdout) == {"version": "dev"}
 
 
 def test_volume_survives_removing_the_container(sandbox):
