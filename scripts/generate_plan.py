@@ -2,10 +2,12 @@
 """Deterministic wine plan generator.
 
 Reads inventory.json and produces plan.json with allWeeks (52 entries),
-quarterInfo, and changelog.  Before it writes, it copies the live
-$SITE_DIR/plan.json to $DATA_DIR/plan_previous.json, compares the new plan
-with it for the changelog, and copies its tasting notes to weeks with the
-same wine and marks.  A live plan with a bad shape counts as no previous plan.
+quarterInfo, and changelog.  Before it writes, it reads the live
+$SITE_DIR/plan.json.  If that file is valid JSON, the script copies it to
+$DATA_DIR/plan_previous.json, compares the new plan with it for the
+changelog, and copies its tasting notes to weeks with the same wine and
+marks.  A live plan with a bad allWeeks list counts as no previous plan.
+The run drops each changelog history entry with a bad shape.
 
 Usage:
     python3 scripts/generate_plan.py "$DATA_DIR/inventory.json" "$DATA_DIR/plan.json"
@@ -561,7 +563,8 @@ def usable_history(value: object) -> list[dict]:
 
     main() compares each `date` with a cutoff string, so a `date` that is not
     a str would stop the run. The site reads `type` from each item of
-    `changes`, so `changes` must be a list of dicts.
+    `changes`, so `changes` must be a list of dicts. The run drops the other
+    entries.
     """
     if not isinstance(value, list):
         return []
@@ -594,10 +597,10 @@ def reuse_notes(old_weeks: list[dict] | None, new_weeks: list[dict]) -> int:
     """Set the note of each new week from an old week with the same key.
 
     Only a note that valid_note() accepts goes to a new week. Each old note
-    goes to one new week, oldest old week first. A key with more new weeks
-    than old notes leaves the extra weeks empty. When Claude is on,
-    generate_notes.py writes them a note. No note shows in two weeks. Returns the count of
-    reused notes.
+    goes to one new week, lowest old week number first. A key with more new
+    weeks than old notes leaves the extra weeks empty. When Claude is on,
+    generate_notes.py writes a note for them. Returns the count of reused
+    notes.
     """
     old_notes: dict[tuple, list[str]] = {}
     for w in sorted(old_weeks or [], key=lambda w: w.get("week", 0)):

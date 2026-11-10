@@ -15,7 +15,7 @@ Each sync runs these steps:
 7. Write the morning digest files. The digest email goes out on its own schedule (`DIGEST_SEND_SCHEDULE`), if the digest feature is on.
 8. If `HEALTHCHECK_URL` is set, ping Healthchecks.io. The success ping shows the warning count. The fail ping names the step that stopped the sync.
 
-The sync builds the schedule again from scratch each time. CellarTracker is the source of all wine data. Claude writes the tasting notes. The sync keeps a note while the wine and its marks stay the same, and a changed score or window does not change the note. The rules do the rest, so the same cellar on the same day gives the same plan, apart from the Claude notes.
+The sync builds the schedule again from scratch each time. CellarTracker is the source of all wine data. Claude writes the tasting notes for new or changed weeks. The sync keeps the note of a week while the wine and its urgent, evolution and occasion marks stay the same. A new score, window, CellarTracker note or community note does not change a kept note. The rules do the rest, so the same cellar on the same day gives the same plan, apart from the Claude notes.
 
 ## How wines are prioritized
 

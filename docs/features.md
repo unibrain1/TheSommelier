@@ -65,7 +65,7 @@ The digest needs the menu feature. When the menu feature is off, the digest has 
 
 ## Claude tasting notes and menu enrichment
 
-Claude writes a short tasting note for each bottle. It also reads the menu text to improve the pairings. A sync keeps a note while the wine and its marks (urgent, evolution and occasion) stay the same, and a changed score or window does not change the note. Claude writes a note only for a new or changed week. Without Claude, a week keeps the note of the last plan if it has one. Other weeks have no note, and the pairings use keyword matching.
+Claude writes a short tasting note for each bottle. It also reads the menu text to improve the pairings. A sync keeps a note while the wine and its marks (urgent, evolution and occasion) stay the same. A new score, window, CellarTracker note or community note does not change a kept note. Claude writes a note only for a new or changed week. Without Claude, a week keeps the note of the last plan if it has one. Other weeks have no note, and the pairings use keyword matching.
 
 There are three choices. Set at most one key.
 

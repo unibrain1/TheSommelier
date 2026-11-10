@@ -162,7 +162,7 @@ else
 fi
 
 # --- GENERATE PLAN to staging (scripted — rules-based) ---
-# Build new plan in DATA_DIR first, only publish to SITE_DIR when complete with notes
+# Build new plan in DATA_DIR first, only publish to SITE_DIR when the run completes
 STEP="plan"
 log "==> Generating plan..."
 python3 scripts/generate_plan.py "${DATA_DIR}/inventory.json" "${DATA_DIR}/plan.json" || { log "ERROR: Plan generation failed"; exit 1; }
@@ -182,9 +182,9 @@ else
   NOTES_RC=0
   python3 scripts/generate_notes.py "${DATA_DIR}/plan.json" "${DATA_DIR}/notes.tsv" "${DATA_DIR}/foodtags.tsv" "${DATA_DIR}/community_notes.json" "${DATA_DIR}/inventory.json" || NOTES_RC=$?
   if [[ ${NOTES_RC} -eq 3 ]]; then
-    warn "Note generation incomplete — plan has empty notes"
+    warn "Note generation incomplete — some new weeks have no note"
   elif [[ ${NOTES_RC} -ne 0 ]]; then
-    warn "Note generation failed — plan will have empty notes"
+    warn "Note generation failed — new weeks have no note"
   fi
 fi
 
@@ -212,7 +212,7 @@ if [[ ${MENU_ON} -eq 1 ]]; then
   python3 scripts/pairing.py "${DATA_DIR}/menu.json" "${DATA_DIR}/plan.json" "${DATA_DIR}/inventory.json" "${DATA_DIR}/menu_enriched_full.json" > "${DATA_DIR}/pairing_suggestions.json" || { log "ERROR: Pairing failed"; exit 1; }
 fi
 
-# --- PUBLISH atomically (site always has a complete plan with notes) ---
+# --- PUBLISH atomically (site always has the plan of a complete run) ---
 STEP="publish"
 log "==> Publishing to ${SITE_DIR}..."
 # container_health.py reads the mtime of the published plan.json as the time of
