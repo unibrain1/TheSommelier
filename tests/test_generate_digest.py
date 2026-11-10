@@ -256,6 +256,8 @@ class TestFormatDigestHtml:
         wine = _week("2026-04-13", name=f'Wine "{attack}"', vintage=attack)
         wine["note"] = attack
         wine["location"] = attack
+        wine["window"] = attack
+        wine["score"] = attack
         digest = {
             "date": "2026-04-18",
             "date_display": attack,

@@ -3,7 +3,6 @@
 import json
 from unittest.mock import patch
 
-import pytest
 
 from enrich_menu import (
     _validate_enriched,
@@ -476,8 +475,37 @@ class TestMainExitCode:
         assert self._run(tmp_path, reply) == 1
         assert "ERROR: No menu entries enriched of 2" in capsys.readouterr().err
 
-    @pytest.mark.parametrize("reply", ["", json.dumps({"0": {"protein": "pork"}})])
-    def test_write_failure_returns_1(self, tmp_path, capsys, reply):
+    def test_write_failure_with_all_entries_cached_returns_1(self, tmp_path, capsys):
+        menu_path = tmp_path / "menu.json"
+        _write_menu(menu_path, ["Pork chop"])
+        cache_path = tmp_path / "cache.json"
+        cache_path.write_text(
+            json.dumps({text_hash("Pork chop"): {"protein": "pork"}}),
+            encoding="utf-8",
+        )
+        # needed=0, so only the write check can give exit 1. A folder at the
+        # output path makes the atomic replace fail.
+        output_path = tmp_path / "full.json"
+        output_path.mkdir()
+        with patch("enrich_menu.call_claude") as claude:
+            assert (
+                main(
+                    [
+                        "enrich_menu.py",
+                        str(menu_path),
+                        str(cache_path),
+                        str(output_path),
+                    ]
+                )
+                == 1
+            )
+        claude.assert_not_called()
+        captured = capsys.readouterr()
+        assert "all 1 entries cached" in captured.out
+        assert "ERROR: Failed to write" in captured.err
+
+    def test_write_failure_after_enrichment_returns_1(self, tmp_path, capsys):
+        reply = json.dumps({"0": {"protein": "pork"}})
         menu_path = tmp_path / "menu.json"
         _write_menu(menu_path, ["Pork chop"])
         # A folder at the cache path makes the atomic replace fail.
