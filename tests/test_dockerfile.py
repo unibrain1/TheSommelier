@@ -217,3 +217,20 @@ def test_dockerfile_checks_supercronic_sha256(arch):
     assert f"${{SUPERCRONIC_SHA256_{arch}}}" in run
     assert "sha256sum -c -" in run
     assert "--connect-timeout" in run and "--max-time" in run
+
+
+def test_dockerfile_writes_the_version_after_the_copy_and_before_the_user():
+    lines = _dockerfile_lines()
+    copy = lines.index("COPY . /app")
+    arg = lines.index("ARG APP_VERSION=dev")
+    write = next(
+        i
+        for i, line in enumerate(lines)
+        if line.startswith("RUN ") and "/app/site/version.json" in line
+    )
+    user = lines.index("USER " + _instructions("USER")[0])
+
+    # /app/site exists only after the COPY. A write after USER fails, because root owns /app.
+    assert copy < arg < write < user
+    assert "json.dump" in lines[write]
+    assert '"${APP_VERSION}"' in lines[write]

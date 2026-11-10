@@ -1,6 +1,7 @@
 """Static checks of the workflow that publishes the image to GHCR."""
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -168,3 +169,89 @@ def test_a_manual_run_on_a_tag_fails_before_the_build(steps):
         "github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/')"
     )
     assert "exit 1" in guard["run"]
+
+
+SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _run_step_script(
+    steps: list, tmp_path: Path, ref: str, ref_name: str, sha: str = SHA
+) -> tuple[subprocess.CompletedProcess, Path]:
+    script = next(s for s in steps if s.get("id") == "version")["run"]
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "GITHUB_REF": ref,
+        "GITHUB_REF_NAME": ref_name,
+        "GITHUB_SHA": sha,
+        "GITHUB_OUTPUT": str(output),
+    }
+    result = subprocess.run(
+        ["bash", "-e", "-c", script], env=env, capture_output=True, text=True
+    )
+    return result, output
+
+
+def _run_version_step(steps: list, tmp_path: Path, ref: str, ref_name: str) -> str:
+    """Run the real script of the version step and return the value it writes."""
+    result, output = _run_step_script(steps, tmp_path, ref, ref_name)
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1, lines
+    key, _, value = lines[0].partition("=")
+    assert key == "version"
+    return value
+
+
+@pytest.mark.parametrize(
+    ("ref", "ref_name", "expected"),
+    [
+        ("refs/tags/v4.1.0", "v4.1.0", "4.1.0"),
+        ("refs/tags/v4.1.0-rc.1", "v4.1.0-rc.1", "4.1.0-rc.1"),
+        ("refs/heads/main", "main", "edge-0123456"),
+        ("refs/heads/milestone/v4.1.0", "milestone/v4.1.0", "edge-0123456"),
+        ("refs/pull/7/merge", "7/merge", "edge-0123456"),
+    ],
+)
+def test_the_version_step_gives_the_version_of_each_ref(
+    steps, tmp_path, ref, ref_name, expected
+):
+    assert _run_version_step(steps, tmp_path, ref, ref_name) == expected
+
+
+@pytest.mark.parametrize(
+    ("ref", "ref_name", "sha"),
+    [("refs/tags/v4.1.0", "", SHA), ("refs/heads/main", "main", "")],
+)
+def test_the_version_step_fails_on_an_empty_version(
+    steps, tmp_path, ref, ref_name, sha
+):
+    result, output = _run_step_script(steps, tmp_path, ref, ref_name, sha)
+
+    assert result.returncode != 0
+    assert "No image version" in result.stdout
+    assert output.read_text(encoding="utf-8") == ""
+
+
+def test_the_version_step_reads_the_refs_from_the_environment(steps):
+    script = next(s for s in steps if s.get("id") == "version")["run"]
+
+    # ${{ }} text in run: puts the tag name into the script before bash reads it.
+    assert "${{" not in script
+
+
+def test_the_version_step_runs_before_the_build(steps):
+    ids = [s.get("id") for s in steps]
+    build = steps.index(_step(steps, "docker/build-push-action"))
+
+    assert ids.index("version") < build
+
+
+def test_the_build_passes_the_version_to_the_image(steps):
+    build = _step(steps, "docker/build-push-action")
+
+    assert (
+        build["with"]["build-args"]
+        == "APP_VERSION=${{ steps.version.outputs.version }}"
+    )
