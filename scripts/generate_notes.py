@@ -242,6 +242,7 @@ def generate_notes(
     notes_generated = 0
     for i in range(0, len(needs_notes), BATCH_SIZE):
         batch = needs_notes[i : i + BATCH_SIZE]
+        batch_weeks = {w["week"] for w in batch}
         prompt = build_prompt(batch, ct_notes, ct_foodtags, inv_index, community_notes)
 
         print(f"  Batch {i // BATCH_SIZE + 1}: {len(batch)} wines...")
@@ -260,7 +261,13 @@ def generate_notes(
                     file=sys.stderr,
                 )
                 continue
-            if week_num not in week_map:
+            # A week outside the batch can hold a note from reuse_notes().
+            if week_num not in batch_weeks:
+                print(
+                    f"WARNING: Skipping the note for week {week_num}: "
+                    "the week is not in this batch",
+                    file=sys.stderr,
+                )
                 continue
             checked = valid_note(note)
             if checked is None:

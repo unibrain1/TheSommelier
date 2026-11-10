@@ -61,6 +61,24 @@ def _write_plan(path, weeks, note_weeks=()):
     path.write_text(json.dumps({"allWeeks": entries}), encoding="utf-8")
 
 
+def test_a_note_for_a_week_outside_the_batch_keeps_the_reused_note(
+    tmp_path, monkeypatch, capsys
+):
+    plan = tmp_path / "plan.json"
+    _write_plan(plan, [1, 2], note_weeks=[2])
+    reply = '{"1": "Note one.", "2": "A replacement note."}'
+    monkeypatch.setattr(generate_notes, "call_claude", lambda _prompt: reply)
+
+    assert generate_notes.main(["generate_notes.py", str(plan)]) == 0
+
+    weeks = {w["week"]: w for w in json.loads(plan.read_text())["allWeeks"]}
+    assert weeks[1]["note"] == "Note one."
+    assert weeks[2]["note"] == "Already here."
+    captured = capsys.readouterr()
+    assert "WARNING: Skipping the note for week 2" in captured.err
+    assert "Generated 1 notes." in captured.out
+
+
 def test_main_returns_3_and_names_the_missing_weeks(tmp_path, monkeypatch, capsys):
     plan = tmp_path / "plan.json"
     _write_plan(plan, [12, 3, 1, 7, 2])
