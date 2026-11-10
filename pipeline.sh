@@ -58,8 +58,6 @@ rm -f "${SITE_DIR}"/.thisweek.json.* "${SITE_DIR}"/.today.json.*
 
 # --- FETCH (scripted) ---
 CURL_TIMEOUTS=(--connect-timeout 15 --max-time 300)
-# -S logs the cause of a failure (DNS, timeout, HTTP code). The message names
-# the host, not the query, so no secret goes into the log.
 
 # A secret goes to curl in a config on stdin, not in argv, where `ps` shows
 # it. Only builtins (printf, parameter expansion) touch it, so no child process
@@ -74,6 +72,8 @@ curl_quote() { local v=${1//\\/\\\\}; printf '"%s"' "${v//\"/\\\"}"; }
 ct_fetch() {
   local extra=""
   [[ -n "${3:-}" ]] && extra="data = \"$3\""$'\n'
+  # -S logs the cause of a failure (DNS, timeout, HTTP code). The message names
+  # the host, not the query, so no secret goes into the log.
   printf 'url = "https://www.cellartracker.com/xlquery.asp"\nget\ndata = "Format=tab"\ndata = "Table=%s"\n%sdata-urlencode = %s\ndata-urlencode = %s\n' \
     "$1" "${extra}" "$(curl_quote "User=${USERNAME}")" "$(curl_quote "Password=${PASSWORD}")" \
     | curl -sSf "${CURL_TIMEOUTS[@]}" -K - -o "$2"

@@ -73,8 +73,8 @@ ENUM_VALUES: dict[str, frozenset[str]] = {
     "sweetness": frozenset({"low", "medium", "high"}),
     "spice_heat": frozenset({"none", "low", "medium", "high"}),
 }
-# A food feature is a few words, and the prompt asks for 1-3 list items. Longer
-# text or more items is not a food feature.
+# Text longer than MAX_FIELD_CHARS drops the field. A list longer than
+# MAX_LIST_ITEMS is cut.
 MAX_FIELD_CHARS = 80
 MAX_LIST_ITEMS = 5
 
