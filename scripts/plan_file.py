@@ -8,8 +8,8 @@ tracks. A file that is not valid, or a folder that cannot be searched,
 raises PlanConfigError. The message starts
 with the file path, then the field, for example
 "/config/evolution_tracks.yaml: evolution_tracks[0].preferred_month: must be an
-integer from 1 to 12". The older plan.yaml, with both keys, is not read.
-load() warns when it is in the folder.
+integer from 1 to 12". plan.yaml, the single file of the v4.0.0 pre-release
+(edge) builds, is not read. load() warns when it is in the folder.
 """
 
 import calendar
@@ -32,7 +32,8 @@ DEFAULT_HOLIDAYS: list[tuple[str, int, int]] = [
 
 HOLIDAYS_FILE = "holidays.yaml"
 TRACKS_FILE = "evolution_tracks.yaml"
-# The older single file with both keys. load() only warns that it is not used.
+# The single file with both keys of the v4.0.0 pre-release (edge) builds.
+# load() only warns that it is not used.
 OLD_FILE = "plan.yaml"
 
 _HOLIDAY_KEYS = ("name", "month", "day")

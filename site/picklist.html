@@ -40,6 +40,8 @@
 
 <div class="total" id="total"></div>
 
+<footer>The Sommelier · Version <span id="app-version">unknown</span></footer>
+
 <script>
 var allRows = [];
 var currentRange = 0; // 0 = all
@@ -233,6 +235,16 @@ Promise.all([
   document.querySelectorAll('.week-filter .filter-btn')[1].classList.add('active');
   renderPickList();
 });
+
+// The version is not in the Promise.all above, so a missing version.json never stops the page.
+fetch('version.json').then(function(r) {
+  if (!r.ok) return;
+  return r.json().then(function(v) {
+    if (v && typeof v.version === 'string' && v.version) {
+      document.getElementById('app-version').textContent = v.version;
+    }
+  });
+}).catch(function() {});
 </script>
 </body>
 </html>

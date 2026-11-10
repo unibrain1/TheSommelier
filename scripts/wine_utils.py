@@ -188,15 +188,17 @@ def call_claude(prompt: str) -> str:
             capture_output=True,
             text=True,
             timeout=120,
-            # Only the credential of the chosen mode. Other variables, such as
-            # the CLAUDE_CODE_USE_* provider flags, pass through unchanged.
+            # An allow list, so a secret in .env such as PASSWORD does not
+            # reach the CLI. Of the Claude credentials, only the key of the
+            # chosen mode passes.
             env=settings.claude_env(os.environ),
         )
     except subprocess.TimeoutExpired:
         print("WARNING: Claude CLI timed out", file=sys.stderr)
         return ""
     except FileNotFoundError as e:
-        # The CLI is not installed. Continue with empty notes, as for a timeout.
+        # The CLI is not installed. Return an empty reply, as for a timeout.
+        # The caller continues without Claude output.
         print(f"WARNING: Claude CLI could not start: {e}", file=sys.stderr)
         return ""
     if result.returncode != 0:
@@ -217,10 +219,15 @@ def call_claude(prompt: str) -> str:
 
 
 def extract_json(text: str) -> dict:
-    """Extract JSON object from Claude's response."""
+    """Extract the JSON object from Claude's response.
+
+    Return {} and print a warning to stderr when the text has no valid JSON
+    object.
+    """
     start = text.find("{")
     end = text.rfind("}") + 1
     if start == -1 or end == 0:
+        print("WARNING: Claude response has no JSON object", file=sys.stderr)
         return {}
     try:
         return json.loads(text[start:end])

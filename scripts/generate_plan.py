@@ -2,12 +2,21 @@
 """Deterministic wine plan generator.
 
 Reads inventory.json and produces plan.json with allWeeks (52 entries),
-quarterInfo, and changelog.  Before it writes, it copies the live
-$SITE_DIR/plan.json to $DATA_DIR/plan_previous.json and compares the new plan
-with it for the changelog.
+quarterInfo, and changelog.  Before it writes, it reads the live
+$SITE_DIR/plan.json.  If that file is valid JSON, the script copies it to
+$DATA_DIR/plan_previous.json, compares the new plan with it for the
+changelog, and copies its tasting notes to weeks with the same wine and
+marks.  A live plan with a bad allWeeks list counts as no previous plan.
+The run drops each changelog history entry with a bad shape.
 
 Usage:
     python3 scripts/generate_plan.py "$DATA_DIR/inventory.json" "$DATA_DIR/plan.json"
+
+Exit codes:
+    0  the plan is written. No live plan at all is a first run, not a problem.
+    1  no plan is written
+    3  the plan is written, but the live plan could not be read, had no usable
+       allWeeks list, or lost changelog history entries
 """
 
 import json
@@ -23,6 +32,7 @@ if "TZ" in os.environ:
 
 import plan_file
 import settings
+from generate_notes import valid_note
 from scoring import composite_score
 from wine_utils import (
     CURRENT_YEAR,
@@ -491,12 +501,13 @@ def build_quarter_info(week_dates: list[date]) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def plan_key(w: dict) -> str:
+    """Return the wine identity of a plan week: vintage and name."""
+    return f"{w.get('vintage', '')}|{w.get('name', '')}"
+
+
 def diff_plans(old_weeks: list[dict], new_weeks: list[dict]) -> list[dict]:
     """Compare two allWeeks lists and return changelog entries."""
-
-    def plan_key(w: dict) -> str:
-        return f"{w.get('vintage', '')}|{w.get('name', '')}"
-
     old_by_key: dict[str, list[int]] = {}
     for w in old_weeks:
         k = plan_key(w)
@@ -526,6 +537,90 @@ def diff_plans(old_weeks: list[dict], new_weeks: list[dict]) -> list[dict]:
             )
 
     return changes
+
+
+# ---------------------------------------------------------------------------
+# Note reuse
+# ---------------------------------------------------------------------------
+
+
+def usable_weeks(value: object) -> list[dict] | None:
+    """Return the allWeeks value of a live plan, or None if its shape is bad.
+
+    The changelog sorts the weeks by `week`, and the note reuse sorts by
+    `week` and keys on `occasion`. So each week must be a dict with an int
+    `week` and a str or None `occasion`.
+    """
+    if not isinstance(value, list):
+        return None
+    for w in value:
+        if not isinstance(w, dict):
+            return None
+        week = w.get("week")
+        if not isinstance(week, int) or isinstance(week, bool):
+            return None
+        if not isinstance(w.get("occasion"), (str, type(None))):
+            return None
+    return value
+
+
+def usable_history(value: object) -> list[dict]:
+    """Return the changelog entries of a live plan that have a usable shape.
+
+    main() compares each `date` with a cutoff string, so a `date` that is not
+    a str would stop the run. The site reads `type` from each item of
+    `changes`, so `changes` must be a list of dicts. The run drops the other
+    entries.
+    """
+    if not isinstance(value, list):
+        return []
+    return [
+        e
+        for e in value
+        if isinstance(e, dict)
+        and isinstance(e.get("date"), str)
+        and isinstance(e.get("changes"), list)
+        and all(isinstance(c, dict) for c in e["changes"])
+    ]
+
+
+def note_key(w: dict) -> tuple[str, bool, bool, str | None]:
+    """Key a week by its wine and its marks: urgent, evolution and occasion.
+
+    The window, scores and CellarTracker notes also go into the note prompt,
+    but they are not in the key. They change rarely, and a key on them would
+    make Claude write a note again for a small change.
+    """
+    return (
+        plan_key(w),
+        bool(w.get("urgent")),
+        bool(w.get("evolution")),
+        w.get("occasion") or None,
+    )
+
+
+def reuse_notes(old_weeks: list[dict] | None, new_weeks: list[dict]) -> int:
+    """Set the note of each new week from an old week with the same key.
+
+    Only a note that valid_note() accepts goes to a new week. Each old note
+    goes to one new week, lowest old week number first. A key with more new
+    weeks than old notes leaves the extra weeks empty. When Claude is on,
+    generate_notes.py writes a note for them. Returns the count of reused
+    notes.
+    """
+    old_notes: dict[tuple, list[str]] = {}
+    for w in sorted(old_weeks or [], key=lambda w: w.get("week", 0)):
+        note = valid_note(w.get("note"))
+        if note:
+            old_notes.setdefault(note_key(w), []).append(note)
+
+    reused = 0
+    for w in new_weeks:
+        notes = old_notes.get(note_key(w))
+        if notes:
+            w["note"] = notes.pop(0)
+            reused += 1
+    return reused
 
 
 # ---------------------------------------------------------------------------
@@ -924,21 +1019,50 @@ def main() -> None:
 
     inventory: list[dict] = json.loads(inventory_path.read_text(encoding="utf-8"))
 
-    # Load previous plan for changelog diffing (from the live site plan)
+    # The live site plan gives the changelog diff and the notes to reuse.
     live_plan_path = settings.site_dir() / "plan.json"
     old_weeks: list[dict] | None = None
     old_history: list[dict] = []
     old_data = None
+    # True when a live plan file was read. A file that holds JSON null is
+    # still a live plan, so old_data alone cannot tell it from a first run.
+    old_read = False
+    # True when the live plan exists but its history or notes are lost.
+    previous_lost = False
     if live_plan_path.exists():
         try:
             old_data = json.loads(live_plan_path.read_text(encoding="utf-8"))
-            old_weeks = old_data.get("allWeeks")
-            old_history = old_data.get("changelogHistory") or []
+            old_read = True
         except (json.JSONDecodeError, OSError) as exc:
-            print(f"Warning: could not read existing plan ({exc})", file=sys.stderr)
+            print(f"WARNING: could not read existing plan ({exc})", file=sys.stderr)
+            previous_lost = True
     else:
         print(f"Note: no live plan at {live_plan_path}, changelog history starts empty")
-    if old_data is not None:
+    if old_read:
+        # A bad file must not stop every later sync. The first good run
+        # writes over it.
+        weeks = old_data.get("allWeeks") if isinstance(old_data, dict) else None
+        old_weeks = usable_weeks(weeks)
+        if old_weeks is None or not isinstance(old_data, dict):
+            print(
+                "WARNING: existing plan has no usable allWeeks list, "
+                "so the run uses no previous plan and no changelog history",
+                file=sys.stderr,
+            )
+            previous_lost = True
+        else:
+            history = old_data.get("changelogHistory") or []
+            old_history = usable_history(history)
+            dropped = (
+                len(history) - len(old_history) if isinstance(history, list) else 1
+            )
+            if dropped:
+                print(
+                    f"WARNING: dropped {dropped} changelog history entries "
+                    "with a bad shape from the existing plan",
+                    file=sys.stderr,
+                )
+                previous_lost = True
         try:
             previous_path.parent.mkdir(parents=True, exist_ok=True)
             previous_path.write_text(
@@ -947,7 +1071,9 @@ def main() -> None:
             )
             print(f"Previous plan backed up to {previous_path}")
         except OSError as exc:
-            print(f"Warning: could not back up plan ({exc})", file=sys.stderr)
+            # Not counted in the ping and no exit 3: no code reads
+            # plan_previous.json, so the run loses nothing.
+            print(f"WARNING: could not back up plan ({exc})", file=sys.stderr)
 
     # Apply default drinking windows for wines missing CellarTracker data
     defaulted = apply_default_windows(inventory)
@@ -956,6 +1082,8 @@ def main() -> None:
 
     print(f"Generating plan from {len(inventory)} inventory wines…")
     plan_data = generate_plan(inventory, plan_config)
+    reused = reuse_notes(old_weeks, plan_data["allWeeks"])
+    no_note = sum(1 for w in plan_data["allWeeks"] if not w["note"])
 
     changelog = build_changelog(old_weeks, plan_data["allWeeks"])
 
@@ -985,6 +1113,12 @@ def main() -> None:
     print(f"Plan written to {plan_path}")
     print(f"  {len(plan_data['allWeeks'])} weeks scheduled")
     print(f"  Changelog: +{added} added, -{removed} removed")
+    print(
+        f"  Notes: {reused} reused from the previous plan, {no_note} weeks have no note"
+    )
+    if previous_lost:
+        # pipeline.sh counts exit 3 as a warning and goes on with this plan.
+        sys.exit(3)
 
 
 if __name__ == "__main__":

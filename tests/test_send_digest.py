@@ -246,6 +246,22 @@ class TestMain:
         assert "SECRET-canary" not in err
         assert not (digest_dirs[0] / "digest_last_sent.txt").exists()
 
+    def test_main_stale_digest_exits_3_with_error(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        set_creds(monkeypatch)
+        monkeypatch.setattr("send_digest._today_local", lambda: "2026-04-19")
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 3
+        err = capsys.readouterr().err
+        assert (
+            "ERROR: Digest is for 2026-04-18, not today (2026-04-19). "
+            "Use --force to override." in err
+        )
+        assert smtp.instances == []
+        assert not (digest_dirs[0] / "digest_last_sent.txt").exists()
+
     def test_main_missing_credentials_exits_1(
         self, digest_dirs, monkeypatch, smtp, capsys
     ):

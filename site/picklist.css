@@ -168,6 +168,14 @@ tbody tr:hover { background: #faf8f5; }
   color: var(--muted);
 }
 
+footer {
+  margin-top: 32px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* Print */
 @media print {
   body { padding: 12px; }

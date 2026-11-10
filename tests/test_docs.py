@@ -12,7 +12,10 @@ import settings
 REPO = Path(__file__).resolve().parent.parent
 
 # settings.py names these only to warn a host that still sets them.
-REMOVED_VARS = {"HA_SSH_TARGET", *settings.REMOVED_FLAGS}
+REMOVED_VARS = {"HA_SSH_TARGET", settings.UNUSED_OP_VAR, *settings.REMOVED_FLAGS}
+# settings.py names these to pass them to the claude CLI. They are not settings
+# of this app, so the docs and the samples do not list them.
+CLAUDE_ENV_PASS = {*settings.CLAUDE_ENV_NAMES, *settings.CLAUDE_ENV_PREFIXES}
 # HEALTHCHECK_URL replaced these. settings.py ignores them and does not name them.
 OLD_HEALTHCHECK_VARS = {
     "HEALTHCHECK_PING_KEY",
@@ -22,9 +25,9 @@ OLD_HEALTHCHECK_VARS = {
 }
 # The removed variables that a v3 release read. The others came and went
 # inside the v4.0.0 milestone, so no v3 .env holds them.
-V3_VARS = {"HA_SSH_TARGET", "HEALTHCHECK_PING_KEY"}
+V3_VARS = {"HA_SSH_TARGET", "HEALTHCHECK_PING_KEY", settings.UNUSED_OP_VAR}
 # Scripts read these outside settings.py, which does not own them.
-SHELL_VARS = {"SYNC_SCHEDULE", "DIGEST_SEND_SCHEDULE", "TZ"}
+SHELL_VARS = {"TZ"}
 UPPER_NAME = re.compile(r"""["']([A-Z][A-Z0-9_]{2,})["']""")
 
 SAMPLES = (
@@ -93,7 +96,7 @@ def _section(text: str, heading: str) -> str:
 
 def _code_env_names() -> set[str]:
     names = set(UPPER_NAME.findall(_text("scripts/settings.py")))
-    return (names - REMOVED_VARS) | SHELL_VARS
+    return (names - REMOVED_VARS - CLAUDE_ENV_PASS) | SHELL_VARS
 
 
 def _user_settings() -> set[str]:
@@ -293,13 +296,12 @@ def test_docs_describe_both_files(name):
 
 
 # These name the old plan.yaml on purpose: the upgrade page, the release notes
-# and the old-file warning (docs/plan-configuration.md, CLAUDE.md). The
+# and the one old-file warning (docs/plan-configuration.md). The
 # private_paths line of .claude/project.md keeps it, because the owner's old
 # file stays on disk.
 OLD_FILE_ALLOWED = {
     UPGRADE_PAGE,
     "docs/plan-configuration.md",
-    "CLAUDE.md",
     ".claude/project.md",
 }
 
@@ -320,6 +322,28 @@ def test_the_old_file_allow_list_is_needed():
     # A name on the list that no longer names plan.yaml should leave the list.
     for name in OLD_FILE_ALLOWED - {UPGRADE_PAGE}:
         assert re.search(r"\bplan\.yaml\b", _text(name)), name
+
+
+def test_claude_md_has_no_ghcr_private_note():
+    assert "stays private" not in _text("CLAUDE.md")
+
+
+def test_features_gives_the_logo_rule():
+    section = _section(_text("docs/features.md"), "## Morning digest email")
+    for part in (
+        "`site/logo.png`",
+        "from the code",
+        "`SITE_URL` + `/logo.png`",
+        "`https://` URL",
+        "warning",
+    ):
+        assert part in section, part
+
+
+def test_the_old_file_warning_names_the_edge_builds():
+    text = _text("docs/plan-configuration.md")
+    assert "v4.0.0 pre-release (edge) builds used a `plan.yaml` file" in text
+    assert not re.search(r"\bv3\b", text)
 
 
 def test_the_quick_start_says_how_to_update_the_image():

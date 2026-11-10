@@ -65,6 +65,8 @@
 <div id="changelog-view"></div>
 
 
+<footer>The Sommelier · Version <span id="app-version">unknown</span></footer>
+
 <script>
 let allWeeks = [];
 let quarterInfo = {};
@@ -505,6 +507,16 @@ Promise.all([
     '<h2>Unable to load the wine plan</h2>' +
     '<p>Please try refreshing the page. (' + err.message + ')</p></div>';
 });
+
+// The version is not in the Promise.all above, so a missing version.json never stops the page.
+fetch('version.json').then(function(r) {
+  if (!r.ok) return;
+  return r.json().then(function(v) {
+    if (v && typeof v.version === 'string' && v.version) {
+      document.getElementById('app-version').textContent = v.version;
+    }
+  });
+}).catch(function() {});
 </script>
 </body>
 </html>

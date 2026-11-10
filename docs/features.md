@@ -10,6 +10,8 @@ Each section lists what the feature does, how to turn it on, and its keys. The f
 
 The sync runs at the times in `SYNC_SCHEDULE`. The digest email has its own schedule. All cron times use `TZ`. The menu dates and the digest day always use Pacific time.
 
+A scheduled sync that starts while another sync runs is skipped. The log shows `Skipping sync: another sync holds /tmp/sync.lock`, and the skipped run sends no ping.
+
 To change a schedule, remove the `# ` from its line in `compose.yaml` and edit the value. All three keys are plain values.
 
 | Key | Default |
@@ -59,11 +61,13 @@ The digest needs the menu feature. When the menu feature is off, the digest has 
 | `SMTP_FROM` | plain | value of `SMTP_USERNAME` |
 | `SITE_URL` | plain, optional | none |
 
-`SITE_URL` is the public URL of your site. The email may use it to show the logo.
+`SITE_URL` is the public URL of your site. The email embeds `site/logo.png` from the code in the image or the checkout, not from the run output. If that file is missing, the email uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set, or is not an `http://` or `https://` URL, the email has no logo, and the digest logs a warning.
 
 ## Claude tasting notes and menu enrichment
 
-Claude writes a short tasting note for each bottle. It also reads the menu text to improve the pairings. Without Claude, the notes are empty and the pairings use keyword matching.
+Claude writes a short tasting note for each bottle. It also reads the menu text to improve the pairings. A sync keeps a note while the wine and its marks (urgent, evolution and occasion) stay the same. A new score, window, CellarTracker note or community note does not change a kept note. Claude writes a note only for a new or changed week. Without Claude, a week keeps the note of the last plan if it has one. Other weeks have no note, and the pairings use keyword matching.
+
+A note stays while the week keeps the same wine and marks. A week with an empty or missing note gets a new note in the next sync, if Claude is on. To get new notes, remove the `note` values from the live `/data/site/plan.json`. Or delete that file, but this also clears the changelog history. Then start a sync with `docker compose run --rm run-now`. Until a sync completes, the site shows no plan and the container is unhealthy.
 
 There are three choices. Set at most one key.
 
@@ -73,7 +77,7 @@ There are three choices. Set at most one key.
 | Subscription | `CLAUDE_CODE_OAUTH_TOKEN` | `ANTHROPIC_API_KEY` |
 | API | `ANTHROPIC_API_KEY` | `CLAUDE_CODE_OAUTH_TOKEN` |
 
-If you set both keys, the feature is off. The sync runs without notes and logs a warning that names both keys. Each sync logs the choice: `claude: on (subscription)`, `claude: on (API key)` or `claude: off` with the reason.
+If you set both keys, the feature is off. The sync writes no new notes and logs a warning that names both keys. Each sync logs the choice: `claude: on (subscription)`, `claude: on (API key)` or `claude: off` with the reason.
 
 | Key | Kind | Default |
 | --- | --- | --- |
@@ -88,7 +92,7 @@ For the subscription, the container logs in with a token. The runs use your Clau
 2. Put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN`. Remove the `# ` from its line in `compose.yaml`.
 3. Run `docker compose down && docker compose up -d`.
 
-The token expires one year after you make it. After that, the sync continues with empty notes. Make a new token and replace the value.
+The token expires one year after you make it. After that, the sync continues with no new notes. Make a new token and replace the value.
 
 For the API, put your Anthropic API key in `.env` as `ANTHROPIC_API_KEY`. Remove the `# ` from its line in `compose.yaml`. Then run `docker compose down && docker compose up -d`. The runs go on your API bill.
 
@@ -122,6 +126,24 @@ The check schedule on Healthchecks.io must match `SYNC_SCHEDULE`. If it does not
 - Grace time: 45 minutes
 
 Healthchecks.io accepts only one cron expression. The 22:00 run sends one extra ping, which has no effect. If you change `SYNC_SCHEDULE`, change the check schedule in the same change.
+
+The success ping body starts with `Pipeline completed successfully.` It has the `Bottles`, `Weeks planned` and `Time` lines. It has a line `Warnings: N`, where N is the number of warnings in the run.
+
+The sync counts a warning when an optional step fails. Examples are community notes, tasting notes, menu enrichment, the Home Assistant JSON files and digest generation. The sync also counts each `WARNING:` line of the settings check. An example is a feature that is off because some of its settings are missing or not valid. A feature with no settings at all adds a warning only when its flag has a value that is not valid.
+
+If N is greater than 0, the ping lists each warning line below the count. The warning lines hold no secret values.
+
+When some weeks get no tasting note, the log names those weeks, and the run counts a warning. When no note is made, the note step fails, the run counts a warning, and the sync publishes the plan with no new notes.
+
+When the live `plan.json` cannot be read, has no usable week list, or has changelog history entries with a bad shape, the sync builds the plan without that data. Then the changelog history or the reused notes are lost, and the run counts the warning "Plan generation could not use the previous plan". No live plan at all is a first run, and it adds no warning.
+
+When Claude enriches some menu entries but not all, the run counts the warning "Menu enrichment incomplete". When Claude enriches no entry that needs it, or the enrichment files cannot be written, the run counts the warning "Menu enrichment failed". In both cases, pairing uses keyword matching for each meal that has no enrichment. A menu with all entries in the cache needs no Claude call and adds no warning.
+
+A failed run sends the body `Pipeline failed at step: <step>. Check container logs for details.` The step name is one of a fixed set, such as `settings`, `fetch`, `parse`, `plan`, `compare`, `pairing` or `publish`. The body holds no secret.
+
+The scheduled digest send (`DIGEST_SEND_SCHEDULE`) also pings `HEALTHCHECK_URL`. It sends a fail ping with the cause when the send fails. It also sends a fail ping when `digest.json` is stale. The file is stale when it is not for today. There are two causes. The last sync did not finish, or it did not make a new digest. Or `DIGEST_SEND_SCHEDULE` fires before the first `SYNC_SCHEDULE` run of the day. The digest schedule must fire after the first sync of the day. The default schedules follow this rule. Healthchecks.io then sends its alert. The next successful sync sends a success ping, and the check returns to up.
+
+A manual run with `--dry-run` or `--force` sends no ping. So does a digest run that reports "Nothing to send", "already sent" or "not configured".
 
 ## Container health check
 

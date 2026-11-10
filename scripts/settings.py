@@ -7,15 +7,21 @@ rules forbid eval:
 
   settings.py check              Log the state of each feature. Exit 1 when a
                                  required variable (USERNAME, PASSWORD) is
-                                 missing.
+                                 missing or holds a control character.
   settings.py enabled <feature>  Exit 0 when the feature is on, else 1.
-  settings.py get <name>         Print one value (data_dir, site_dir).
+  settings.py get <name>         Print one value (data_dir, site_dir,
+                                 sync_schedule, digest_schedule).
 
 A bad argument exits 2. DATA_DIR defaults to /data, SITE_DIR defaults to
 $DATA_DIR/site, and CONFIG_DIR (the folder of the plan files) defaults to
 /config.
 HEALTH_MAX_AGE_MINUTES defaults to 600. A value that is not a positive integer
 gives the default, and check logs a warning.
+get removes each blank entry (between ";") of SYNC_SCHEDULE or
+DIGEST_SEND_SCHEDULE. A value with no entry left gives the default and a
+warning. Only SYNC_SCHEDULE can hold more than one cron expression.
+get exits 1 (not 2) when a schedule holds a control character, such as a line
+break, or when DIGEST_SEND_SCHEDULE holds more than one cron expression.
 
 A feature turns on when all its settings are present and valid. Only
 home_assistant has a <FEATURE>_ENABLED flag. It has no settings, so it turns
@@ -46,6 +52,38 @@ CLAUDE_OAUTH_TOKEN = "CLAUDE_CODE_OAUTH_TOKEN"
 UNUSED_ANTHROPIC_VAR = "ANTHROPIC_AUTH_TOKEN"
 CLAUDE_CREDENTIALS = (CLAUDE_API_KEY, UNUSED_ANTHROPIC_VAR, CLAUDE_OAUTH_TOKEN)
 
+# The claude subprocess gets only these variables, so a new secret in .env
+# cannot reach it by default. The prefixes keep the CLI and provider settings.
+CLAUDE_ENV_NAMES = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "TZ",
+        "LANG",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "CLAUDE_CONFIG_DIR",
+    }
+)
+CLAUDE_ENV_PREFIXES = ("LC_", "CLAUDE_CODE_", "ANTHROPIC_", "DISABLE_")
+
+# The container gets its secrets from the host and runs no 1Password CLI. A
+# service account token left in .env is a secret with no use. A checkout run
+# with 1Password on a host needs the token, so check warns only in a container.
+UNUSED_OP_VAR = "OP_SERVICE_ACCOUNT_TOKEN"
+# Docker writes /.dockerenv and Podman writes /run/.containerenv.
+CONTAINER_MARKERS = ("/.dockerenv", "/run/.containerenv")
+
 # The SSH push to Home Assistant was removed in v4.0.0. A host that still sets
 # this variable would otherwise see frozen sensors with no signal.
 REMOVED_HA_VAR = "HA_SSH_TARGET"
@@ -64,6 +102,9 @@ DEFAULT_SMTP_HOST = "smtp.gmail.com"
 DEFAULT_SMTP_PORT = 587
 # The 8-hour night gap of the default schedule, plus 2 hours.
 DEFAULT_HEALTH_MAX_AGE_MINUTES = 600
+# ";" separates the cron expressions of one schedule.
+DEFAULT_SYNC_SCHEDULE = "*/30 6-21 * * *;0 22 * * *"
+DEFAULT_DIGEST_SCHEDULE = "0 8 * * *"
 
 # feature -> (enable flag, settings that must be present). A feature with no
 # flag is on when its settings are. The claude feature has its own rule in
@@ -91,7 +132,10 @@ ALL_VARS: tuple[str, ...] = (
     "SMTP_PORT",
     "SMTP_FROM",
     "HEALTH_MAX_AGE_MINUTES",
+    "SYNC_SCHEDULE",
+    "DIGEST_SEND_SCHEDULE",
     UNUSED_ANTHROPIC_VAR,
+    UNUSED_OP_VAR,
     REMOVED_HA_VAR,
     *REMOVED_FLAGS,
 )
@@ -114,6 +158,10 @@ _MODE_KEY: dict[str, str] = {
     "subscription": CLAUDE_OAUTH_TOKEN,
 }
 _MODE_LABEL: dict[str, str] = {"api_key": "API key", "subscription": "subscription"}
+
+
+class SettingError(ValueError):
+    """A setting value that must stop the start. The message holds no value."""
 
 
 @dataclass(frozen=True)
@@ -176,6 +224,10 @@ def site_dir() -> Path:
 
 def config_dir() -> Path:
     return Path(_env("CONFIG_DIR") or DEFAULT_CONFIG_DIR)
+
+
+def _has_control_char(value: str) -> bool:
+    return any(ord(c) < 32 or ord(c) == 127 for c in value)
 
 
 def required() -> list[str]:
@@ -291,12 +343,18 @@ def claude_mode(environ: Mapping[str, str] | None = None) -> ClaudeMode:
 
 
 def claude_env(environ: Mapping[str, str]) -> dict[str, str]:
-    """Return a copy of environ for the claude subprocess.
+    """Return the environment for the claude subprocess.
 
-    The copy holds no Claude credential except the key of the chosen mode. With
-    mode none or conflict, it holds none of them.
+    It holds only the variables in CLAUDE_ENV_NAMES or with a prefix in
+    CLAUDE_ENV_PREFIXES. It holds no Claude credential except the key of the
+    chosen mode. With mode none or conflict, it holds none of them.
     """
-    env = {k: v for k, v in environ.items() if k not in CLAUDE_CREDENTIALS}
+    env = {
+        k: v
+        for k, v in environ.items()
+        if (k in CLAUDE_ENV_NAMES or k.startswith(CLAUDE_ENV_PREFIXES))
+        and k not in CLAUDE_CREDENTIALS
+    }
     key = _MODE_KEY.get(claude_mode(environ))
     if key:
         env[key] = environ[key].strip()
@@ -408,6 +466,52 @@ def health_max_age_minutes() -> int:
     return _health_max_age() or DEFAULT_HEALTH_MAX_AGE_MINUTES
 
 
+def _schedule(var: str, default: str, multiple: bool) -> str:
+    # Each entry goes into the crontab as given. A newline would add a crontab
+    # line that runs any command.
+    value = os.environ.get(var, "")
+    # Before the blank check, so that a lone line break is an error, not blank.
+    if _has_control_char(value):
+        raise SettingError(
+            f"ERROR: {var} holds a control character. "
+            "Use one line, with spaces between the fields."
+        )
+    # A crontab line with no schedule makes supercronic reject the whole file,
+    # digest line included. str.strip also removes a no-break space.
+    entries = [entry for entry in value.split(";") if entry.strip()]
+    if not entries:
+        if value:
+            print(
+                f"WARNING: {var} has no cron expression. Using the default.",
+                file=sys.stderr,
+            )
+        return default
+    # entrypoint.sh writes the digest as one crontab line. A ";" in that line
+    # makes supercronic reject the whole crontab, sync lines included.
+    if not multiple and len(entries) > 1:
+        raise SettingError(
+            f"ERROR: {var} holds more than one cron expression. Use one."
+        )
+    return ";".join(entries)
+
+
+def sync_schedule() -> str:
+    """Return SYNC_SCHEDULE with no blank entry, or the default when none is left.
+
+    Raises SettingError when the value holds a control character.
+    """
+    return _schedule("SYNC_SCHEDULE", DEFAULT_SYNC_SCHEDULE, multiple=True)
+
+
+def digest_schedule() -> str:
+    """Return DIGEST_SEND_SCHEDULE with no blank entry, or the default when none is left.
+
+    Raises SettingError when the value holds a control character or more than
+    one cron expression.
+    """
+    return _schedule("DIGEST_SEND_SCHEDULE", DEFAULT_DIGEST_SCHEDULE, multiple=False)
+
+
 OP_WARNING = (
     "WARNING: A value starts with op://. "
     "Resolve it before the start, for example with op run."
@@ -441,10 +545,25 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
         )
         if _unresolved(_env("HEALTH_MAX_AGE_MINUTES")):
             warnings.append(OP_WARNING)
+    # Both URLs hold a secret, which http sends as clear text.
+    on = {state.name: state.on for state in states}
+    for name, var, url in (
+        ("healthcheck", "HEALTHCHECK_URL", _hc_url()),
+        ("menu", "GOOGLE_CALENDAR_ICS_URL", _env("GOOGLE_CALENDAR_ICS_URL")),
+    ):
+        if on[name] and urlsplit(url).scheme == "http":
+            warnings.append(
+                f"WARNING: {var} uses http. The value holds a secret. Use https."
+            )
     if _env(UNUSED_ANTHROPIC_VAR):
         warnings.append(
             f"WARNING: {UNUSED_ANTHROPIC_VAR} is set. It is not used. "
             f"Remove it from .env. Set {CLAUDE_API_KEY} or {CLAUDE_OAUTH_TOKEN}."
+        )
+    if _env(UNUSED_OP_VAR) and any(os.path.exists(m) for m in CONTAINER_MARKERS):
+        warnings.append(
+            f"WARNING: {UNUSED_OP_VAR} is set. The Sommelier does not use it. "
+            "Remove it from .env."
         )
     if _env(REMOVED_HA_VAR):
         warnings.append(
@@ -461,6 +580,13 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
             )
     errors = [
         f"ERROR: Required variable {n} is missing or not resolved" for n in required()
+    ]
+    # pipeline.sh gives the credentials to curl as lines of a config. A newline
+    # or a CR would end the line.
+    errors += [
+        f"ERROR: {n} holds a control character"
+        for n in REQUIRED
+        if _has_control_char(os.environ.get(n, ""))
     ]
     errors += [
         f"ERROR: {n} is not resolved. Set a path."
@@ -484,14 +610,24 @@ def _main(argv: list[str]) -> int:
             return 2
         return 0 if feature(argv[1]).on else 1
     if len(argv) == 2 and argv[0] == "get":
-        getters = {"data_dir": data_dir, "site_dir": site_dir}
+        getters = {
+            "data_dir": data_dir,
+            "site_dir": site_dir,
+            "sync_schedule": sync_schedule,
+            "digest_schedule": digest_schedule,
+        }
         if argv[1] not in getters:
             print(f"ERROR: Unknown setting: {argv[1]}", file=sys.stderr)
             return 2
-        print(getters[argv[1]]())
+        try:
+            print(getters[argv[1]]())
+        except SettingError as e:
+            print(e, file=sys.stderr)
+            return 1
         return 0
     print(
-        "Usage: settings.py check | enabled <feature> | get <data_dir|site_dir>",
+        "Usage: settings.py check | enabled <feature> | get <data_dir|site_dir|"
+        "sync_schedule|digest_schedule>",
         file=sys.stderr,
     )
     return 2

@@ -251,6 +251,49 @@ class TestFormatDigestHtml:
         html = format_digest_html(digest)
         assert "Past peak" in html
 
+    def test_data_values_are_escaped(self):
+        attack = "<script>alert(1)</script>"
+        wine = _week("2026-04-13", name=f'Wine "{attack}"', vintage=attack)
+        wine["note"] = attack
+        wine["location"] = attack
+        wine["window"] = attack
+        wine["score"] = attack
+        digest = {
+            "date": "2026-04-18",
+            "date_display": attack,
+            "has_content": True,
+            "wine": wine,
+            "tonight": {
+                "meal": attack,
+                "bottle": {
+                    "vintage": attack,
+                    "wine": attack,
+                    "type": "Red",
+                    "window": attack,
+                    "urgency": attack,
+                    "location": attack,
+                },
+                "pairing": {"score": attack},
+            },
+            "pairings": [],
+        }
+
+        html = format_digest_html(digest)
+
+        assert "<script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+        assert "Wine &quot;" in html
+
+    def test_meal_of_a_good_pairing_is_escaped(self):
+        digest = _digest() | {
+            "pairings": [{"meal": "<b>Pasta</b>", "pairing": {"score": "good"}}]
+        }
+
+        html = format_digest_html(digest)
+
+        assert "<b>Pasta</b>" not in html
+        assert "&lt;b&gt;Pasta&lt;/b&gt;" in html
+
     def test_branding_present(self):
         digest = {
             "date": "2026-04-18",

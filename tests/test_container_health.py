@@ -111,7 +111,9 @@ def test_health_max_age_minutes_changes_the_limit(clean_env, tmp_path, site, cap
 
 
 def test_default_url_is_nginx_in_the_container():
-    assert container_health.SITE_URL == "http://127.0.0.1:8080/index.html"
+    assert container_health.NGINX_INDEX_URL == "http://127.0.0.1:8080/index.html"
+    # SITE_URL is a setting. The local name must not look like one.
+    assert not hasattr(container_health, "SITE_URL")
 
 
 def test_plan_json_that_is_a_folder_is_not_healthy(clean_env, site, tmp_path, capsys):

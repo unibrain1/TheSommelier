@@ -1,8 +1,8 @@
 """Run the real shell pipeline against a fake `curl`. No network, no `claude`.
 
 Each test copies the shell scripts and `scripts/` into `tmp_path/app`, so the
-real `data/` and `site/` folders stay as they are. The fake `curl` copies a
-fixture file and logs each URL. A local HTTP server stands in for
+real `data/` and `site/` folders stay as they are. The fake `curl` reads its
+config on stdin, copies a fixture file, and logs each URL and its argv. A local HTTP server stands in for
 Healthchecks.io and for the community notes feed (that script uses urllib,
 not curl).
 """
@@ -34,7 +34,13 @@ from tests.helpers import (
 )
 
 REPO = Path(__file__).resolve().parent.parent
-SHELL_SCRIPTS = ("pipeline.sh", "fetch.sh", "fetch_docker.sh", "send_digest.sh")
+SHELL_SCRIPTS = (
+    "pipeline.sh",
+    "fetch.sh",
+    "fetch_docker.sh",
+    "send_digest.sh",
+    "sync.sh",
+)
 KEY_CANARY = "canary-key-7f3a9c1e5b"
 FAKE_USER = "fake-user"
 FAKE_PASSWORD = "fake-password-canary"
@@ -43,32 +49,119 @@ BOTTLE_COPIES = 14
 BOTTLES = 6 * BOTTLE_COPIES
 ICS_URL = "https://calendar.example.test/private/menu.ics"
 
-# Reads -o and the URL like the real call does, logs the URL, and copies the
-# fixture. A missing fixture is an HTTP error for `curl -f`: exit 22. Without
-# -g, real curl reads [] and {} as a glob and fails a URL with them: exit 3.
-FAKE_CURL = """#!/usr/bin/env bash
-out=""
-url=""
-globoff=0
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -o) out="$2"; shift 2 ;;
-    -*g*) globoff=1; shift ;;
-    -*) shift ;;
-    *) url="$1"; shift ;;
-  esac
-done
-echo "${url}" >> "${FAKE_CURL_LOG}"
-[[ ${globoff} -eq 1 || "${url}" != *[\\[\\]\\{\\}]* ]] || exit 3
-case "${url}" in
-  *Table=Inventory*) name=inventory.tsv ;;
-  *Table=Notes*) name=notes.tsv ;;
-  *Table=FoodTags*) name=foodtags.tsv ;;
-  *Table=Consumed*) name=consumed.tsv ;;
-  *) name=menu.ics ;;
-esac
-[[ -f "${FAKE_CURL_FIXTURES}/${name}" ]] || exit 22
-cp "${FAKE_CURL_FIXTURES}/${name}" "${out}"
+# Reads the config on stdin (`-K -`) like real curl, logs its argv and the
+# URL it would send, and copies the fixture. The URL is `url?data&data...` in
+# config order, with each data-urlencode value encoded as curl 8 does it
+# (space as `+`, lowercase hex). With no --connect-timeout or --max-time it
+# exits 28, the curl timeout code, so each run also checks the timeouts. A
+# missing fixture is an HTTP error for `curl -f`: exit 22. Without globoff,
+# real curl reads [] and {} as a glob and fails a URL with them: exit 3.
+FAKE_CURL = r"""#!/usr/bin/env python3
+import os, re, shutil, sys
+
+UNRESERVED = re.compile(r"[A-Za-z0-9._~-]")
+
+
+def encode(text):
+    out = []
+    for byte in text.encode("utf-8"):
+        char = chr(byte)
+        if UNRESERVED.fullmatch(char):
+            out.append(char)
+        elif char == " ":
+            out.append("+")
+        else:
+            out.append("%%%02x" % byte)
+    return "".join(out)
+
+
+def config_value(raw):
+    if not raw.startswith('"'):
+        return raw.split()[0] if raw.split() else ""
+    escapes = {"t": "\t", "n": "\n", "r": "\r", "v": "\v"}
+    out, i = [], 1
+    while i < len(raw) and raw[i] != '"':
+        if raw[i] == "\\" and i + 1 < len(raw):
+            i += 1
+            out.append(escapes.get(raw[i], raw[i]))
+        else:
+            out.append(raw[i])
+        i += 1
+    return "".join(out)
+
+
+args = sys.argv[1:]
+with open(os.environ["FAKE_CURL_ARGV_LOG"], "a") as log:
+    log.write(" ".join(args) + "\n")
+
+out, url, get, globoff, timeouts, data = "", "", False, False, set(), []
+lines = []
+i = 0
+while i < len(args):
+    arg = args[i]
+    if arg == "-o":
+        out, i = args[i + 1], i + 2
+        continue
+    if arg == "-K":
+        if args[i + 1] != "-":
+            sys.exit(2)
+        # curl ends a config line only at \n. splitlines() also splits at
+        # U+2028 and other characters that real curl keeps in the value.
+        lines = sys.stdin.read().split("\n")
+        i += 2
+        continue
+    if arg in ("--connect-timeout", "--max-time"):
+        timeouts.add(arg)
+        i += 2
+        continue
+    if not arg.startswith("-"):
+        url = arg
+    i += 1
+
+for line in lines:
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    match = re.match(r"(?:--)?([A-Za-z-]+)\s*[=:]?\s*(.*)$", line)
+    if match is None:
+        sys.exit(2)
+    key, value = match.group(1), config_value(match.group(2))
+    if key == "url":
+        url = value
+    elif key == "get":
+        get = True
+    elif key == "globoff":
+        globoff = True
+    elif key == "data":
+        data.append(value)
+    elif key == "data-urlencode":
+        name, sep, content = value.partition("=")
+        if not sep:
+            sys.exit(2)
+        data.append(name + "=" + encode(content))
+    else:
+        sys.exit(2)
+
+if data:
+    if not get:
+        sys.exit(2)
+    url = url + "?" + "&".join(data)
+with open(os.environ["FAKE_CURL_LOG"], "a") as log:
+    log.write(url + "\n")
+
+if timeouts != {"--connect-timeout", "--max-time"}:
+    sys.exit(28)
+if not globoff and re.search(r"[\[\]{}]", url):
+    sys.exit(3)
+name = "menu.ics"
+for table, fixture in (("Inventory", "inventory.tsv"), ("Notes", "notes.tsv"),
+                       ("FoodTags", "foodtags.tsv"), ("Consumed", "consumed.tsv")):
+    if "Table=" + table in url:
+        name = fixture
+source = os.path.join(os.environ["FAKE_CURL_FIXTURES"], name)
+if not os.path.isfile(source):
+    sys.exit(22)
+shutil.copy(source, out)
 """
 
 
@@ -123,6 +216,7 @@ class Harness:
     app: Path
     fixtures: Path
     curl_log: Path
+    curl_argv_log: Path
     path: str
     server: LocalServer
     env: dict[str, str] = field(default_factory=dict)
@@ -131,6 +225,11 @@ class Harness:
         if not self.curl_log.exists():
             return []
         return self.curl_log.read_text().splitlines()
+
+    def curl_argvs(self) -> list[str]:
+        if not self.curl_argv_log.exists():
+            return []
+        return self.curl_argv_log.read_text().splitlines()
 
     def run(
         self,
@@ -221,11 +320,13 @@ def harness(tmp_path, server) -> Harness:
         pytest.skip("a claude CLI is on the test PATH, the tests need none")
 
     curl_log = tmp_path / "curl.log"
+    curl_argv_log = tmp_path / "curl_argv.log"
     env = {
         "PATH": path,
         "HOME": str(tmp_path / "home"),
         "PYTHONDONTWRITEBYTECODE": "1",
         "FAKE_CURL_LOG": str(curl_log),
+        "FAKE_CURL_ARGV_LOG": str(curl_argv_log),
         "FAKE_CURL_FIXTURES": str(fixtures),
         "USERNAME": FAKE_USER,
         "PASSWORD": FAKE_PASSWORD,
@@ -234,7 +335,7 @@ def harness(tmp_path, server) -> Harness:
         "SITE_DIR": str(tmp_path / "run" / "data" / "site"),
         "CONFIG_DIR": str(app / "config"),
     }
-    return Harness(tmp_path, app, fixtures, curl_log, path, server, env)
+    return Harness(tmp_path, app, fixtures, curl_log, curl_argv_log, path, server, env)
 
 
 def _output(result: subprocess.CompletedProcess) -> str:
@@ -356,6 +457,10 @@ def test_pipeline_failure_sends_fail_ping(harness):
     # The fake ran, and it failed the inventory fetch.
     assert any("Table=Inventory" in u for u in harness.curl_urls())
     assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    body = harness.server.posts[0][1]
+    assert "Pipeline failed at step: fetch." in body
+    assert KEY_CANARY not in body
+    assert FAKE_PASSWORD not in body
     assert KEY_CANARY not in result.stdout
     assert KEY_CANARY not in result.stderr
 
@@ -368,6 +473,7 @@ def test_pipeline_settings_failure_sends_fail_ping(harness):
 
     assert result.returncode != 0, _output(result)
     assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    assert "Pipeline failed at step: settings." in harness.server.posts[0][1]
     # No fetch ran.
     assert harness.curl_urls() == []
     assert KEY_CANARY not in result.stdout
@@ -384,8 +490,43 @@ def test_pipeline_success_sends_ping(harness):
     body = harness.server.posts[0][1]
     assert f"Bottles: {BOTTLES}" in body
     assert "Weeks planned: 52" in body
+    # The local server is http, so the settings check warns once.
+    assert (
+        "Warnings: 1\n- WARNING: HEALTHCHECK_URL uses http. The value holds a secret. "
+        "Use https.\nTime: "
+    ) in body
     assert KEY_CANARY not in result.stdout
     assert KEY_CANARY not in result.stderr
+
+
+def test_degraded_run_success_ping_counts_and_lists_warnings(harness):
+    """A settings warning (incomplete digest) and a failed note step both count."""
+    path = _stub_claude(harness.root) + os.pathsep + harness.path
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+            # Only one SMTP setting puts the digest in the incomplete state.
+            "SMTP_USERNAME": "sender@example.test",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier"]
+    body = harness.server.posts[0][1]
+    lines = body.splitlines()
+    count = next(int(s.split(": ")[1]) for s in lines if s.startswith("Warnings: "))
+    listed = [s for s in lines if s.startswith("- WARNING: ")]
+    assert count == len(listed)
+    assert count >= 2
+    assert any(s.startswith("- WARNING: digest is off.") for s in listed), body
+    assert "- WARNING: Note generation failed — new weeks have no note" in lines
+    assert "Pipeline completed successfully." in body
+    for secret in (KEY_CANARY, "key-canary-9d2c", FAKE_PASSWORD):
+        assert secret not in body
 
 
 def test_pipeline_ignores_the_old_healthcheck_variables(harness):
@@ -546,7 +687,8 @@ def test_fetch_sh_reads_dotenv_when_one_required_value_is_missing(harness, missi
     assert result.returncode == 0, _output(result)
     urls = harness.curl_urls()
     assert urls
-    # The file is sourced after the env, so the file value wins for every name.
+    # The script sources the file after the env, so the file value wins for
+    # each name.
     assert any("User=fromfile&Password=fromfile-pw" in u for u in urls)
     assert "https://file.example.test/x.ics" in urls
 
@@ -601,6 +743,125 @@ def test_fetch_sh_with_menu_on_prints_pairing_summary(harness):
     assert "Pairing: menu feature is off" not in result.stdout
 
 
+def _write_digest(site: Path, html: str = "<html>digest</html>") -> None:
+    """Write the digest files that send_digest.py --force sends."""
+    (site / "digest.html").write_text(html, encoding="utf-8")
+    (site / "digest.json").write_text(
+        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
+        encoding="utf-8",
+    )
+
+
+_SMTP_DOTENV = (
+    "SMTP_USERNAME='sender@example.test'\n"
+    "SMTP_PASSWORD='smtp-pw-canary'\n"
+    "DIGEST_RECIPIENTS='a@example.test'\n"
+)
+
+
+def test_send_digest_sh_stale_digest_sends_fail_ping(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    _write_digest(site)
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
+
+    result = harness.run("send_digest.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode == 3, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    body = harness.server.posts[0][1]
+    assert body == (
+        "Digest not sent: digest.json is not for today. The last sync did not "
+        "finish, or it did not make a new digest."
+    )
+    assert "smtp-pw-canary" not in body
+
+
+def test_send_digest_sh_failed_send_sends_fail_ping(harness):
+    """No digest.json is a failed send, not a stale digest."""
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
+
+    result = harness.run("send_digest.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode == 1, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    assert harness.server.posts[0][1] == (
+        "Digest send failed. Check container logs for details."
+    )
+
+
+@pytest.mark.parametrize("args", [("--dry-run",), ("--force", "--dry-run")])
+def test_send_digest_sh_manual_run_sends_no_ping(harness, args):
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
+
+    result = harness.run(
+        "send_digest.sh", args=args, extra=_enable_healthcheck(harness)
+    )
+
+    assert result.returncode == 1, _output(result)
+    assert harness.server.posts == []
+
+
+def _digest_not_sent_case(harness: Harness, case: str) -> None:
+    """Set up one of the good states in which the scheduled digest sends nothing."""
+    if case == "not_configured":
+        return
+    import send_digest
+
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    today = send_digest._today_local()
+    has_content = case == "already_sent"
+    (site / "digest.html").write_text("<html>digest</html>", encoding="utf-8")
+    (site / "digest.json").write_text(
+        json.dumps({"date": today, "has_content": has_content, "wine": None}),
+        encoding="utf-8",
+    )
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
+    if case == "already_sent":
+        # SITE_DIR is inside DATA_DIR, so the folder exists.
+        data = Path(harness.env["DATA_DIR"])
+        (data / "digest_last_sent.txt").write_text(today, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("not_configured", "Digest email not configured"),
+        ("nothing_to_send", "Nothing to send (no menu today)"),
+        ("already_sent", "Digest already sent today"),
+    ],
+)
+def test_send_digest_sh_good_scheduled_run_sends_no_ping(harness, case, message):
+    """A scheduled run that exits 0 must not ping, whatever the reason."""
+    _digest_not_sent_case(harness, case)
+
+    result = harness.run("send_digest.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode == 0, _output(result)
+    assert message in result.stdout, _output(result)
+    assert harness.server.posts == []
+
+
+def _fake_flock(harness: Harness, rc: int) -> str:
+    """Return a PATH with a `flock` that only exits with rc. The host can lack flock."""
+    return _stub_bin(harness.root, "flock", rc) + os.pathsep + harness.path
+
+
+def test_sync_sh_logs_the_cause_of_a_skipped_run(harness):
+    result = harness.run("sync.sh", extra={"PATH": _fake_flock(harness, 75)})
+
+    assert result.returncode == 0, _output(result)
+    assert "Skipping sync: another sync holds /tmp/sync.lock" in result.stdout
+
+
+def test_sync_sh_keeps_the_exit_code_of_a_failed_run(harness):
+    result = harness.run("sync.sh", extra={"PATH": _fake_flock(harness, 1)})
+
+    assert result.returncode == 1, _output(result)
+    assert "Skipping sync" not in result.stdout + result.stderr
+
+
 def test_send_digest_sh_dry_run_without_op(harness):
     run = harness.run("fetch_docker.sh")
     assert run.returncode == 0, _output(run)
@@ -624,16 +885,8 @@ def test_send_digest_sh_with_dotenv_reads_site_folder_of_the_app(harness):
     site = harness.app / "site"
     site.mkdir()
     html = "<html>" + "x" * 94 + "</html>"
-    (site / "digest.html").write_text(html, encoding="utf-8")
-    (site / "digest.json").write_text(
-        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
-        encoding="utf-8",
-    )
-    (harness.app / ".env").write_text(
-        "SMTP_USERNAME='sender@example.test'\n"
-        "SMTP_PASSWORD='smtp-pw-canary'\n"
-        "DIGEST_RECIPIENTS='a@example.test'\n"
-    )
+    _write_digest(site, html)
+    (harness.app / ".env").write_text(_SMTP_DOTENV)
 
     result = harness.run(
         "send_digest.sh",
@@ -660,11 +913,7 @@ def test_send_digest_sh_with_dotenv_reads_site_folder_of_the_app(harness):
 def test_send_digest_sh_does_not_override_env_with_dotenv(harness):
     site = Path(harness.env["SITE_DIR"])
     site.mkdir(parents=True)
-    (site / "digest.html").write_text("<html>digest</html>", encoding="utf-8")
-    (site / "digest.json").write_text(
-        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
-        encoding="utf-8",
-    )
+    _write_digest(site)
     (harness.app / ".env").write_text(
         "SMTP_USERNAME='fromfile@example.com'\n"
         "SMTP_PASSWORD='fromfile-pw'\n"
@@ -687,15 +936,53 @@ def test_send_digest_sh_does_not_override_env_with_dotenv(harness):
     assert "fromfile" not in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("missing", ["SMTP_USERNAME", "SMTP_PASSWORD"])
+def test_send_digest_sh_reads_dotenv_when_one_smtp_secret_is_missing(harness, missing):
+    """One of the two secrets in the shell does not skip .env, as in fetch.sh."""
+    # Only the SMTP_PASSWORD case fails with the old rule, which checked only
+    # SMTP_USERNAME.
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True)
+    _write_digest(site)
+    (harness.app / ".env").write_text(
+        "SMTP_USERNAME='fromfile@example.com'\n"
+        "SMTP_PASSWORD='smtp-pw-canary'\n"
+        "DIGEST_RECIPIENTS='file@example.com'\n"
+    )
+
+    result = harness.run(
+        "send_digest.sh",
+        args=("--dry-run", "--force"),
+        extra={
+            "SMTP_USERNAME": "fromenv@example.com",
+            "SMTP_PASSWORD": "fromenv-pw",
+            "DIGEST_RECIPIENTS": "env@example.com",
+        },
+        drop=(missing,),
+    )
+
+    assert result.returncode == 0, _output(result)
+    # The script sources the file after the env, so the file value wins for
+    # each name.
+    assert "From: fromfile@example.com" in result.stdout
+    assert "To: file@example.com" in result.stdout
+    assert "smtp-pw-canary" not in result.stdout + result.stderr
+
+
+def test_send_digest_sh_checks_each_container_marker():
+    # The test host cannot create the marker files, so check the script text.
+    import settings
+
+    script = (REPO / "send_digest.sh").read_text(encoding="utf-8")
+    for marker in settings.CONTAINER_MARKERS:
+        assert f"! -f {marker}" in script, marker
+
+
 def test_send_digest_sh_without_dotenv_uses_repo_site_folder(harness):
     """On the host, fetch.sh writes to the repo folders with or without .env."""
     site = harness.app / "site"
     site.mkdir(exist_ok=True)
-    (site / "digest.html").write_text("<html>digest</html>", encoding="utf-8")
-    (site / "digest.json").write_text(
-        json.dumps({"date": "2000-01-01", "has_content": True, "wine": None}),
-        encoding="utf-8",
-    )
+    _write_digest(site)
     assert not (harness.app / ".env").exists()
 
     result = harness.run(
@@ -724,17 +1011,413 @@ def test_pipeline_failure_after_success_ping_sends_no_fail_ping(harness):
     assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier"]
 
 
+def _stub_bin(root: Path, name: str, rc: int) -> str:
+    """Return a new PATH folder that holds a `name` that only exits with rc."""
+    folder = root / f"{name}bin"
+    folder.mkdir()
+    stub = folder / name
+    stub.write_text(f"#!/usr/bin/env bash\nexit {rc}\n")
+    stub.chmod(0o755)
+    return str(folder)
+
+
+def test_partial_notes_count_as_incomplete(harness):
+    """A Claude reply with a note for week 1 only leaves the other weeks empty."""
+    claude_bin = harness.root / "partialbin"
+    claude_bin.mkdir()
+    stub = claude_bin / "claude"
+    stub.write_text('#!/usr/bin/env bash\necho \'{"1": "A bright, fresh wine."}\'\n')
+    stub.chmod(0o755)
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": str(claude_bin) + os.pathsep + harness.path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "notes missing: weeks 2, 3," in result.stderr
+    lines = harness.server.posts[0][1].splitlines()
+    assert (
+        "- WARNING: Note generation incomplete — some new weeks have no note" in lines
+    )
+
+
+def test_plan_failure_names_the_plan_step(harness):
+    (harness.app / "config" / "holidays.yaml").write_text("holidays: 42\n")
+
+    result = harness.run("fetch_docker.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode != 0, _output(result)
+    assert "Plan generation failed" in result.stdout
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    assert "Pipeline failed at step: plan." in harness.server.posts[0][1]
+
+
 def _stub_claude(root: Path) -> str:
     """Return a PATH folder that holds a `claude` that always fails.
 
     generate_notes.py and enrich_menu.py treat a failing CLI as non-fatal.
     """
-    claude_bin = root / "claudebin"
-    claude_bin.mkdir()
-    stub = claude_bin / "claude"
-    stub.write_text("#!/usr/bin/env bash\nexit 1\n")
+    return _stub_bin(root, "claude", 1)
+
+
+def _stub_claude_notes(root: Path, extra: dict | None = None) -> str:
+    """Return a PATH folder that holds a `claude` with a note for weeks 1 to 60.
+
+    generate_notes.py skips a key that is not a week of the batch, so one reply
+    serves every batch. The stub also answers enrich_menu.py with this text.
+    `extra` adds keys to the reply, for example an enrichment for entry "0".
+    """
+    folder = root / "notesbin"
+    folder.mkdir()
+    reply = folder / "reply.json"
+    reply.write_text(
+        json.dumps(
+            {str(week): f"A fine note for week {week}." for week in range(1, 61)}
+            | (extra or {})
+        )
+    )
+    stub = folder / "claude"
+    stub.write_text(f"#!/usr/bin/env bash\ncat '{reply}'\n")
     stub.chmod(0o755)
-    return str(claude_bin)
+    return str(folder)
+
+
+def _warning_lines(body: str) -> tuple[int, list[str]]:
+    lines = body.splitlines()
+    count = next(int(s.split(": ")[1]) for s in lines if s.startswith("Warnings: "))
+    return count, [s for s in lines if s.startswith("- WARNING: ")]
+
+
+def test_complete_notes_add_no_note_warning(harness):
+    path = _stub_claude_notes(harness.root) + os.pathsep + harness.path
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+        drop=MENU_OFF,
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "Generating tasting notes" in result.stdout
+    # The stub filled all 52 weeks: the plan has no empty note.
+    plan = json.loads((Path(harness.env["SITE_DIR"]) / "plan.json").read_text())
+    assert [w["week"] for w in plan["allWeeks"] if not w["note"]] == []
+    body = harness.server.posts[0][1]
+    count, listed = _warning_lines(body)
+    assert "Note generation" not in body
+    # Only the settings warning for the http HEALTHCHECK_URL is left.
+    assert count == len(listed) == 1, body
+    assert listed[0].startswith("- WARNING: HEALTHCHECK_URL uses http."), body
+    assert "key-canary-9d2c" not in body
+
+
+def test_second_run_reuses_every_note_with_no_claude_call(harness):
+    folder = Path(_stub_claude_notes(harness.root))
+    calls = harness.root / "claude_calls.log"
+    stub = folder / "claude"
+    stub.write_text(
+        f"#!/usr/bin/env bash\necho call >> '{calls}'\ncat '{folder / 'reply.json'}'\n"
+    )
+    extra = {
+        "PATH": str(folder) + os.pathsep + harness.path,
+        "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+    }
+
+    first = harness.run("fetch_docker.sh", extra=extra, drop=MENU_OFF)
+    assert first.returncode == 0, _output(first)
+    assert calls.read_text().count("call") > 0
+    calls.write_text("")
+
+    second = harness.run("fetch_docker.sh", extra=extra, drop=MENU_OFF)
+
+    assert second.returncode == 0, _output(second)
+    assert calls.read_text() == ""
+    assert "Notes: 52 reused from the previous plan, 0 weeks have no note" in (
+        second.stdout
+    )
+    assert "All entries already have notes." in second.stdout
+    plan = json.loads((Path(harness.env["SITE_DIR"]) / "plan.json").read_text())
+    assert [w["week"] for w in plan["allWeeks"] if not w["note"]] == []
+
+
+_PLAN_WARNING = (
+    "- WARNING: Plan generation could not use the previous plan — "
+    "changelog history or reused notes lost"
+)
+
+
+# usable_weeks() has its own unit tests. These two cases check the main() path.
+@pytest.mark.parametrize(
+    "content", ["[1, 2, 3]", '{"allWeeks": [{"week": "1", "note": "Old note."}]}']
+)
+def test_bad_shape_live_plan_is_replaced(harness, content):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "plan.json").write_text(content)
+
+    result = harness.run(
+        "fetch_docker.sh", extra=_enable_healthcheck(harness), drop=MENU_OFF
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "WARNING: existing plan has no usable allWeeks list" in result.stderr
+    assert _PLAN_WARNING in _warning_lines(harness.server.posts[0][1])[1]
+    assert "Notes: 0 reused from the previous plan, 52 weeks have no note" in (
+        result.stdout
+    )
+    plan = json.loads((site / "plan.json").read_text())
+    assert len(plan["allWeeks"]) == 52
+
+
+def test_bad_changelog_history_in_live_plan_is_dropped(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "plan.json").write_text(
+        json.dumps(
+            {
+                "allWeeks": [],
+                "changelogHistory": [
+                    "entry",
+                    {"date": 5, "changes": []},
+                    {"date": "2099-01-01", "changes": 5},
+                ],
+            }
+        )
+    )
+
+    result = harness.run(
+        "fetch_docker.sh", extra=_enable_healthcheck(harness), drop=MENU_OFF
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "WARNING: dropped 3 changelog history entries" in result.stderr
+    assert _PLAN_WARNING in _warning_lines(harness.server.posts[0][1])[1]
+    plan = json.loads((site / "plan.json").read_text())
+    for entry in plan["changelogHistory"]:
+        assert isinstance(entry["date"], str)
+        assert isinstance(entry["changes"], list)
+
+
+@pytest.mark.parametrize("history", [5, "history"])
+def test_changelog_history_that_is_not_a_list_is_dropped(harness, history):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "plan.json").write_text(
+        json.dumps({"allWeeks": [], "changelogHistory": history})
+    )
+
+    result = harness.run(
+        "fetch_docker.sh", extra=_enable_healthcheck(harness), drop=MENU_OFF
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "WARNING: dropped 1 changelog history entries" in result.stderr
+    assert _PLAN_WARNING in _warning_lines(harness.server.posts[0][1])[1]
+    plan = json.loads((site / "plan.json").read_text())
+    assert isinstance(plan["changelogHistory"], list)
+
+
+def test_claude_failing_after_a_run_asks_only_for_the_blank_note(harness):
+    token = {"CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c"}
+    first = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **token,
+            "PATH": _stub_claude_notes(harness.root) + os.pathsep + harness.path,
+        },
+        drop=MENU_OFF,
+    )
+    assert first.returncode == 0, _output(first)
+    plan_path = Path(harness.env["SITE_DIR"]) / "plan.json"
+    plan = json.loads(plan_path.read_text())
+    # reuse_notes() gives the notes of one wine to its weeks in week order.
+    # With the note of the last week of a wine blank, each other week of that
+    # wine keeps its own note.
+    first_wine = plan["allWeeks"][0]
+    blank = [
+        w
+        for w in plan["allWeeks"]
+        if (w["vintage"], w["name"]) == (first_wine["vintage"], first_wine["name"])
+    ][-1]
+    blank["note"] = ""
+    plan_path.write_text(json.dumps(plan))
+    before = {w["week"]: w["note"] for w in plan["allWeeks"]}
+
+    second = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **token,
+            **_enable_healthcheck(harness),
+            "PATH": _stub_claude(harness.root) + os.pathsep + harness.path,
+        },
+        drop=MENU_OFF,
+    )
+
+    assert second.returncode == 0, _output(second)
+    assert (
+        "- WARNING: Note generation failed — new weeks have no note"
+        in (_warning_lines(harness.server.posts[0][1])[1])
+    )
+    assert "Generating notes for 1 entries..." in second.stdout
+    assert "Notes: 51 reused from the previous plan, 1 weeks have no note" in (
+        second.stdout
+    )
+    after = {
+        w["week"]: w["note"] for w in json.loads(plan_path.read_text())["allWeeks"]
+    }
+    assert after == before
+
+
+def test_unreadable_live_plan_is_listed_in_the_success_ping(harness):
+    site = Path(harness.env["SITE_DIR"])
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "plan.json").write_text("{not json")
+
+    result = harness.run(
+        "fetch_docker.sh", extra=_enable_healthcheck(harness), drop=MENU_OFF
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "WARNING: could not read existing plan" in result.stderr
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier"]
+    assert _PLAN_WARNING in _warning_lines(harness.server.posts[0][1])[1]
+
+
+def test_good_live_plan_adds_no_plan_warning(harness):
+    first = harness.run("fetch_docker.sh", drop=MENU_OFF)
+    assert first.returncode == 0, _output(first)
+
+    second = harness.run(
+        "fetch_docker.sh", extra=_enable_healthcheck(harness), drop=MENU_OFF
+    )
+
+    assert second.returncode == 0, _output(second)
+    assert "Plan generation" not in harness.server.posts[0][1]
+
+
+def test_run_with_claude_off_keeps_the_notes_of_the_last_run(harness):
+    folder = _stub_claude_notes(harness.root)
+    first = harness.run(
+        "fetch_docker.sh",
+        extra={
+            "PATH": folder + os.pathsep + harness.path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+        drop=MENU_OFF,
+    )
+    assert first.returncode == 0, _output(first)
+
+    second = harness.run("fetch_docker.sh", drop=MENU_OFF)
+
+    assert second.returncode == 0, _output(second)
+    assert "Generating tasting notes" not in second.stdout
+    assert "Notes: 52 reused from the previous plan, 0 weeks have no note" in (
+        second.stdout
+    )
+    plan = json.loads((Path(harness.env["SITE_DIR"]) / "plan.json").read_text())
+    assert [w["note"] for w in plan["allWeeks"]] == [
+        f"A fine note for week {w['week']}." for w in plan["allWeeks"]
+    ]
+
+
+def test_failed_menu_enrichment_is_listed_in_the_success_ping(harness):
+    path = _stub_claude(harness.root) + os.pathsep + harness.path
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "WARNING: Empty response from Claude" in result.stderr
+    count, listed = _warning_lines(harness.server.posts[0][1])
+    assert count == len(listed)
+    assert (
+        "- WARNING: Menu enrichment failed — some or all meals use keyword matching only"
+        in listed
+    )
+
+
+def test_incomplete_menu_enrichment_is_listed_in_the_success_ping(harness):
+    # The menu fixture has two meals and the cache is empty. The reply enriches
+    # entry "0" only. Its key "1" is a week note, not a usable enrichment.
+    extra = {"0": {"protein": "beef"}}
+    path = _stub_claude_notes(harness.root, extra) + os.pathsep + harness.path
+
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "PATH": path,
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert "WARNING: 1 of 2 menu entries not enriched" in result.stderr
+    count, listed = _warning_lines(harness.server.posts[0][1])
+    assert count == len(listed)
+    assert (
+        "- WARNING: Menu enrichment incomplete — some meals use keyword matching only"
+        in listed
+    )
+    assert not any("Menu enrichment failed" in line for line in listed)
+
+
+def test_claude_on_without_cli_lists_both_skip_warnings(harness):
+    # harness.path holds no `claude`: the fixture skips the test if it does.
+    result = harness.run(
+        "fetch_docker.sh",
+        extra={
+            **_enable_healthcheck(harness),
+            "CLAUDE_CODE_OAUTH_TOKEN": "key-canary-9d2c",
+        },
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier"]
+    body = harness.server.posts[0][1]
+    count, listed = _warning_lines(body)
+    assert count == len(listed)
+    lines = body.splitlines()
+    assert "- WARNING: Skipping note generation — claude CLI not available" in lines
+    assert "- WARNING: Skipping menu enrichment — claude CLI not available" in lines
+    for secret in (KEY_CANARY, "key-canary-9d2c", FAKE_PASSWORD):
+        assert secret not in body
+
+
+@pytest.mark.parametrize(
+    ("step", "script"),
+    [
+        ("parse", "parse_inventory.py"),
+        ("compare", "compare.py"),
+        ("pairing", "pairing.py"),
+    ],
+)
+def test_failed_step_names_the_step_in_the_fail_ping(harness, step, script):
+    (harness.app / "scripts" / script).write_text("raise SystemExit(1)\n")
+
+    result = harness.run("fetch_docker.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode != 0, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    body = harness.server.posts[0][1]
+    assert f"Pipeline failed at step: {step}." in body
+    for secret in (KEY_CANARY, FAKE_PASSWORD, ICS_URL):
+        assert secret not in body
 
 
 @pytest.mark.parametrize(
@@ -1005,7 +1688,7 @@ def test_pipeline_menu_off_removes_files_of_an_earlier_run(harness):
 
 
 def test_pipeline_menu_url_with_brackets_is_fetched_as_is(harness):
-    # Without -g, curl reads [] as a glob and fails the fetch.
+    # Without globoff, curl reads [] as a glob and fails the fetch.
     url = "https://calendar.example.test/private/menu[1].ics"
 
     result = harness.run("fetch_docker.sh", extra={"GOOGLE_CALENDAR_ICS_URL": url})
@@ -1080,3 +1763,70 @@ def test_pipeline_menu_off_digest_is_nothing_to_send(harness):
     assert "Digest generation failed" not in result.stdout
     assert (site / "digest.json").is_file()
     assert (site / "digest.html").is_file()
+    import send_digest
+
+    digest = json.loads((site / "digest.json").read_text())
+    assert digest["date"] == send_digest._today_local()
+
+    # The sync wrote this digest.json, so the scheduled send must not see a
+    # stale digest.
+    sent = harness.run(
+        "send_digest.sh", extra={**digest_env, **_enable_healthcheck(harness)}
+    )
+
+    assert sent.returncode == 0, _output(sent)
+    assert "Nothing to send" in sent.stdout, _output(sent)
+    assert harness.server.posts == []
+
+
+def test_credentials_are_not_in_curl_argv(harness):
+    # Another process can read an argv with `ps`. The secrets go on stdin.
+    result = harness.run("fetch_docker.sh")
+
+    assert result.returncode == 0, _output(result)
+    argvs = harness.curl_argvs()
+    assert len(argvs) == 5, argvs
+    for argv in argvs:
+        for secret in (FAKE_PASSWORD, FAKE_USER, ICS_URL):
+            assert secret not in argv, argv
+        assert "-K -" in argv, argv
+
+
+def test_credentials_are_url_encoded(harness):
+    # Each character of the value must stay in the value: `&` must not start
+    # a new parameter, and `"` and `\\` must not break the config quoting.
+    password = 'p&w"d\\x %+{}'
+    username = "a user"
+
+    result = harness.run(
+        "fetch_docker.sh", extra={"USERNAME": username, "PASSWORD": password}
+    )
+
+    assert result.returncode == 0, _output(result)
+    ct_urls = [u for u in harness.curl_urls() if "Table=" in u]
+    assert len(ct_urls) == 4, ct_urls
+    # curl writes lowercase hex. Compare with no case, as curl versions differ.
+    credentials = "User=a+user&Password=p%26w%22d%5cx+%25%2b%7b%7d"
+    base = "https://www.cellartracker.com/xlquery.asp?Format=tab&Table="
+    expected = {
+        f"{base}Inventory&Location=1&{credentials}".lower(),
+        f"{base}Notes&{credentials}".lower(),
+        f"{base}FoodTags&{credentials}".lower(),
+        f"{base}Consumed&{credentials}".lower(),
+    }
+    assert {u.lower() for u in ct_urls} == expected
+
+
+def test_every_curl_in_pipeline_has_timeouts():
+    text = (REPO / "pipeline.sh").read_text()
+    assert re.search(
+        r"^CURL_TIMEOUTS=\(--connect-timeout \d+ --max-time \d+\)$", text, re.MULTILINE
+    )
+    calls = [
+        line
+        for line in text.splitlines()
+        if re.search(r"\bcurl\s", line) and not line.lstrip().startswith("#")
+    ]
+    assert len(calls) == 2, calls
+    for line in calls:
+        assert '"${CURL_TIMEOUTS[@]}"' in line, line

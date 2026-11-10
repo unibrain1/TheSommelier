@@ -8,7 +8,7 @@ How The Sommelier reads its settings, and a table of every environment variable.
 
 The Sommelier reads all settings from environment variables. In Docker, `compose.yaml` passes them to the container. For a run from a checkout, `.env.sample` lists the variables.
 
-Two variables are required: `USERNAME` and `PASSWORD`. If one is missing, empty, or starts with `op://`, the run stops with an error that names the variable.
+Two variables are required: `USERNAME` and `PASSWORD`. If one is missing, empty, starts with `op://`, or holds a control character (for example a line break), the run stops with an error that names the variable.
 
 Each optional feature has its own section in [Optional features](features.md). Each sync logs the state of each feature.
 
@@ -33,10 +33,10 @@ Do not commit `.env`. Git ignores it.
 | --- | --- | --- | --- |
 | `USERNAME` | none | Yes | CellarTracker user name. |
 | `PASSWORD` | none | Yes | CellarTracker password. |
-| `GOOGLE_CALENDAR_ICS_URL` | none | No | Menu pairing. Secret `.ics` URL (`http://` or `https://`) of the menu calendar. |
+| `GOOGLE_CALENDAR_ICS_URL` | none | No | Menu pairing. Secret `.ics` URL (`http://` or `https://`) of the menu calendar. With `http://`, each sync logs a warning, because the URL holds a secret. |
 | `TZ` | `America/Los_Angeles` in `compose.yaml` | No | Time zone of the plan weeks and the schedules. |
-| `SYNC_SCHEDULE` | `*/30 6-21 * * *;0 22 * * *` | No | Cron expressions for the sync, separated by `;`. |
-| `DIGEST_SEND_SCHEDULE` | `0 8 * * *` | No | Cron expression of the morning digest email. |
+| `SYNC_SCHEDULE` | `*/30 6-21 * * *;0 22 * * *` | No | Cron expressions for the sync, separated by `;`. A line break or other control character, or an expression that is not valid, stops the container start. |
+| `DIGEST_SEND_SCHEDULE` | `0 8 * * *` | No | One cron expression for the morning digest email. A line break or other control character, more than one expression, or an expression that is not valid stops the container start. It must fire after the first `SYNC_SCHEDULE` run of the day. |
 | `SMTP_USERNAME` | none | For the digest | Digest email. On when `SMTP_USERNAME`, `SMTP_PASSWORD` and `DIGEST_RECIPIENTS` are set. |
 | `SMTP_PASSWORD` | none | For the digest | Digest email. SMTP password. |
 | `DIGEST_RECIPIENTS` | none | For the digest | Digest email. Comma-separated addresses. |
@@ -47,6 +47,6 @@ Do not commit `.env`. Git ignores it.
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | For notes | Claude notes and menu enrichment with your Claude subscription. Set at most one Claude key. See [Claude login](features.md#claude-login). |
 | `ANTHROPIC_API_KEY` | none | For notes | Claude notes and menu enrichment on your API bill. Set at most one Claude key. See [Claude login](features.md#claude-login). |
 | `CT_COMMUNITY_NOTES_RSS` | none | For community notes | Community notes. RSS URL of the CellarTracker notes feed. It holds a token. |
-| `HEALTHCHECK_URL` | none | For the ping | Healthchecks.io. The full ping URL of the check. It holds the key. On when the URL is set. |
+| `HEALTHCHECK_URL` | none | For the ping | Healthchecks.io. The full ping URL of the check. It holds the key. On when the URL is set. With `http://`, each sync logs a warning. |
 | `HA_ENABLED` | off | No | Home Assistant. Only `true`, `1` or `yes` turns on the Home Assistant data. |
 | `HEALTH_MAX_AGE_MINUTES` | `600` | No | Container health check. Docker marks the container as unhealthy when the plan is older than this many minutes. |

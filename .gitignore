@@ -2,7 +2,8 @@
 .env
 .env.secrets
 scripts/plan_config.py
-# The older single plan file. A host can still have it.
+# The single plan file of the v4.0.0 pre-release (edge) builds. A host can
+# still have it.
 config/plan.yaml
 config/holidays.yaml
 config/evolution_tracks.yaml

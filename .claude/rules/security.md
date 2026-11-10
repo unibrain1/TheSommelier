@@ -14,7 +14,7 @@ external services and publishes a static web page.
 
 | Area | Files | Risk |
 | --- | --- | --- |
-| Shell | `pipeline.sh`, `fetch.sh`, `fetch_docker.sh`, `entrypoint.sh`, `send_digest.sh` | Secrets, quoting, error handling |
+| Shell | `pipeline.sh`, `fetch.sh`, `fetch_docker.sh`, `sync.sh`, `entrypoint.sh`, `send_digest.sh` | Secrets, quoting, error handling |
 | External data | `curl` calls in `pipeline.sh`, `scripts/fetch_community_notes.py` | Untrusted input from CellarTracker, Google Calendar and RSS |
 | Settings and secrets | `scripts/settings.py`, `scripts/healthcheck.py` | Secrets in logs and errors, the Healthchecks key in a URL |
 | LLM calls | `scripts/wine_utils.py` (`claude` CLI), `scripts/generate_notes.py`, `scripts/enrich_menu.py` | Prompt injection from menu text and wine notes |
@@ -28,8 +28,9 @@ external services and publishes a static web page.
   `.env` file. It must never be in source code, a sample file, a log
   message or an error message.
 - A secret in a command argument or a URL is a finding. Another process can
-  read it with `ps`, and `curl` can print it in an error. The CellarTracker
-  query URL in `pipeline.sh` is a known case.
+  read it with `ps`, and `curl` can print it in an error. `pipeline.sh`
+  gives a secret to `curl` in a config on stdin (`-K -`), written with the
+  `printf` builtin.
 - `set -x`, or an `echo` of a variable that holds a secret, is a finding.
 
 ## Shell

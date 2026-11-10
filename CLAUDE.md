@@ -26,17 +26,21 @@ Production runs in Docker on the owner's homelab server. The commands to restart
 
 Two compose files:
 
-- `examples/compose.yaml` is for a user with no checkout. It uses the image `ghcr.io/unibrain1/thesommelier:4.0` and lists every compose option and every env variable with a comment. A test keeps its variable list in step with the code.
+- `examples/compose.yaml` is for a user with no checkout. It uses the image `ghcr.io/unibrain1/thesommelier:4.1` and lists every compose option and every env variable with a comment. A test keeps its variable list in step with the code.
 - `docker-compose.yml` builds the image from a checkout (`build: .`). It is generic. Host settings (DNS, port, Traefik labels and network) go in the gitignored `docker-compose.override.yml`. The sample is `docker-compose.override.yml.sample`. Production does not use a checkout. It runs the published image from the HomeLab stack `services/applications/the-sommelier/`.
 
-`.github/workflows/publish-image.yml` builds the image for amd64 and arm64. A `vX.Y.Z` tag pushes `X.Y.Z`, `X.Y` and `latest`. A push to `main` or to a `milestone/**` branch pushes `edge`. A manual run needs the workflow file on `main`, and a manual run on a branch also pushes `edge`. A manual run on a tag fails, because only a version tag push can write a release tag. A pull request that changes an image file builds only. A prerelease tag (with `-`) does not push `latest`. The GHCR package stays private until the v4.0.0 release. Then the owner sets it to public in the package settings.
+`.github/workflows/publish-image.yml` builds the image for amd64 and arm64. A `vX.Y.Z` tag pushes `X.Y.Z`, `X.Y` and `latest`. A push to `main` or to a `milestone/**` branch pushes `edge`. A manual run needs the workflow file on `main`, and a manual run on a branch also pushes `edge`. A manual run on a tag fails, because only a version tag push can write a release tag. A pull request that changes an image file builds only. A prerelease tag (with `-`) does not push `latest`.
 
-The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set either, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
+`.github/workflows/tests.yml` runs pytest on each pull request and on a push to `main` or `milestone/**`. A second job builds the image and runs `tests/test_docker_image.py` with `SOMMELIER_DOCKER_TESTS=1`.
+
+The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set, or is not an `http://` or `https://` URL, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
 The image holds the code. The container runs no `git` and no `pip install`. It does not update itself.
 A code change needs a new image. With the published image, run `docker compose pull`, then `docker compose down` and `up`. From a checkout, rebuild with `docker compose build`, then `docker compose down` and `up`.
 `docker compose restart` does NOT re-run the entrypoint — use `down/up` instead.
 `restart` keeps the stored container config. `down/up` and `run-now` read both compose files when they run.
+
+The build arg `APP_VERSION` (`X.Y.Z`, `X.Y.Z-rc.N`, `edge-<sha>`, or the default `dev`) goes into `/app/site/version.json`, and the site footer shows it.
 
 The container root is read-only. The `sommelier-data` named volume is at `/data`. The `./config` folder is at `/config`, read-only. Every write goes to `/data` or `/tmp`.
 
@@ -46,7 +50,7 @@ The image has a `HEALTHCHECK` that runs `scripts/container_health.py`. The check
 
 - **CellarTracker is the system of record** for all wine metadata: Type/badge, Varietal, Appellation, scores, drinking windows, quantity.
 - **Scripted rules** handle: plan generation (scheduling, priority, seasonal fit, evolution, holidays), inventory comparison, food-wine pairing suggestions.
-- **Claude (LLM)** handles: tasting note generation and menu enrichment. Notes are contextual 1-2 sentence descriptions augmented with CellarTracker notes and food tags. Menu enrichment extracts structured food features (protein, preparation, richness, etc.) for pairing. If Claude CLI is unavailable, the pipeline continues with empty notes and falls back to keyword-based pairing.
+- **Claude (LLM)** handles: tasting note generation and menu enrichment. Notes are contextual 1-2 sentence descriptions augmented with CellarTracker notes and food tags. Menu enrichment extracts structured food features (protein, preparation, richness, etc.) for pairing. `generate_plan.py` copies each note from the live plan to a new week with the same vintage, name, `urgent`, `evolution` and `occasion` (`reuse_notes()`), so Claude writes only the notes of new or changed weeks. If Claude CLI is unavailable, the pipeline continues with the reused notes, the other notes empty, and falls back to keyword-based pairing.
 
 ## Plan Generation Rules
 
@@ -55,7 +59,7 @@ Implemented in `scripts/generate_plan.py`:
 - Priority: past peak → expiring → peak window → entering window → long-agers (held)
 - Long-ager hold: BeginConsume > current_year + 2, or hold back 2 if 3+ bottles
 - Seasonal: sparkling/rosé/white for spring-summer, bold reds for fall-winter
-- Holidays and evolution tracks come from two optional YAML files in `CONFIG_DIR`: `holidays.yaml` and `evolution_tracks.yaml`. `CONFIG_DIR` defaults to `/config`, and `bash fetch.sh` uses `config/`. Git ignores both files, because they hold personal data. `scripts/plan_file.py` loads and checks them. No holidays file gives the default holidays. No tracks file gives no tracks. A field that is not valid stops the run. An old `plan.yaml` in the folder is not used, and the run logs a warning.
+- Holidays and evolution tracks come from two optional YAML files in `CONFIG_DIR`: `holidays.yaml` and `evolution_tracks.yaml`. `CONFIG_DIR` defaults to `/config`, and `bash fetch.sh` uses `config/`. Git ignores both files, because they hold personal data. `scripts/plan_file.py` loads and checks them. No holidays file gives the default holidays. No tracks file gives no tracks. A field that is not valid stops the run.
 - Samples at `config/holidays.yaml.sample` and `config/evolution_tracks.yaml.sample`. `scripts/convert_plan_config.py` converts a v3 `plan_config.py` one time and writes both files
 
 ## CellarTracker Data Sources
@@ -99,11 +103,12 @@ The Home Assistant pull (REST sensors, `HA_ENABLED`) and its troubleshooting ste
 ## Important Conventions
 
 - Weeks begin on Monday
+- Pipeline step exit codes: 0 complete, 1 failed, 3 partial with the output written. `pipeline.sh` counts exit 3 as a warning in the success ping. `send_digest.py` uses 3 for a stale `digest.json`, and `send_digest.sh` sends a fail ping for it. `sync.sh` maps the `flock` exit code 75 (a skipped run) to exit 0 after it logs the skip.
 - Pairing scores: `"good"`, `"partial"`, `"poor"`, `"neutral"`
-- `pipeline.sh` has all shared logic; `fetch.sh` and `fetch_docker.sh` are thin wrappers
-- Plan is regenerated from scratch every pipeline run — no manual editing of `plan.json`
-- Plan staged to `$DATA_DIR/plan.json`, only published to `$SITE_DIR` when complete with notes. `DATA_DIR` defaults to `/data`. `SITE_DIR` defaults to `$DATA_DIR/site`. `bash fetch.sh` sets them to the `data/` and `site/` folders of the repo. `docker-compose.yml` sets none of them. In the container the defaults `/data`, `/data/site` and `/config` apply.
-- `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR`, `CONFIG_DIR` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid. Only `home_assistant` has a `<FEATURE>_ENABLED` flag. A flag set to false or to a value that is not valid turns the feature off. A feature with no settings (`home_assistant`) turns on only when its flag is a true value (`true`, `1` or `yes`). A flag in `settings.REMOVED_FLAGS` has no effect, and `check` warns. The `claude` feature has no flag. It turns on when exactly one of `ANTHROPIC_API_KEY` (API key mode) and `CLAUDE_CODE_OAUTH_TOKEN` (subscription mode) is set. With both set it is off, and `check` warns. `settings.claude_env()` gives the `claude` subprocess only the key of the chosen mode. An `op://` value counts as not resolved.
+- `pipeline.sh` has all shared logic; `fetch.sh` and `fetch_docker.sh` are thin wrappers. In the container, `sync.sh` runs `fetch_docker.sh` under the lock `/tmp/sync.lock` for the scheduled and the first sync. It logs a skipped run and exits 0
+- The schedule is regenerated from scratch every pipeline run, and notes carry over (`reuse_notes()`) — no manual editing of `plan.json`
+- Plan staged to `$DATA_DIR/plan.json`, only published to `$SITE_DIR` when the run completes. A week can have no note. `DATA_DIR` defaults to `/data`. `SITE_DIR` defaults to `$DATA_DIR/site`. `bash fetch.sh` sets them to the `data/` and `site/` folders of the repo. `docker-compose.yml` sets none of them. In the container the defaults `/data`, `/data/site` and `/config` apply.
+- `scripts/settings.py` is the one place for env rules: required variables, defaults, `DATA_DIR`, `SITE_DIR`, `CONFIG_DIR` and the on/off rule of each feature. Do not read `os.environ` for settings in other scripts. Shell scripts use `settings.py check|enabled|get`. A feature turns on when all its settings are present and valid. Only `home_assistant` has a `<FEATURE>_ENABLED` flag. A flag set to false or to a value that is not valid turns the feature off. A feature with no settings (`home_assistant`) turns on only when its flag is a true value (`true`, `1` or `yes`). A flag in `settings.REMOVED_FLAGS` has no effect, and `check` warns. The `claude` feature has no flag. It turns on when exactly one of `ANTHROPIC_API_KEY` (API key mode) and `CLAUDE_CODE_OAUTH_TOKEN` (subscription mode) is set. With both set it is off, and `check` warns. `settings.claude_env()` is an allow list. It gives the `claude` subprocess only the system, locale, proxy and Claude CLI variables, plus the key of the chosen mode. No other secret reaches it. An `op://` value counts as not resolved.
 - Shared utilities in `scripts/wine_utils.py` — do not duplicate `urgency_score`, `normalize`, `TYPE_TO_BADGE`, or `CURRENT_YEAR` in individual scripts
 - Composite scoring in `scripts/scoring.py` — `composite_score()` combines: window position (50%), seasonal fit (25%), diversity (10%), CT quality (10%), community signals (5%). Lower score = schedule sooner.
 - Community signals use RSS note data: recent score drift, note velocity, text-based window drift detection

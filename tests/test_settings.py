@@ -528,7 +528,12 @@ def test_menu_valid_url_is_on(clean_env, url):
     result = run_cli(["check"], {**REQUIRED_VALUES, "GOOGLE_CALENDAR_ICS_URL": url})
     assert result.returncode == 0
     assert re.search(r"^\s*menu: on$", result.stdout, re.MULTILINE)
-    assert "WARNING" not in result.stderr
+    # test_check_warns_http_url_without_value covers the http warning.
+    warnings = [ln for ln in result.stderr.splitlines() if "WARNING" in ln]
+    if url.startswith("http:"):
+        assert warnings == [HTTP_WARNING["GOOGLE_CALENDAR_ICS_URL"]]
+    else:
+        assert warnings == []
     assert ICS_CANARY not in result.stdout + result.stderr
 
 
@@ -1129,3 +1134,252 @@ def test_claude_env_holds_only_the_mode_credential(values, kept):
     assert env["HOME"] == "/home/x"
     # The caller's mapping stays as it was.
     assert environ == before
+
+
+ALLOWED_ENV = {
+    "PATH": "/usr/bin",
+    "HOME": "/home/x",
+    "TMPDIR": "/tmp",
+    "TZ": "America/Los_Angeles",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "CLAUDE_CONFIG_DIR": "/tmp/.claude",
+    "DISABLE_AUTOUPDATER": "1",
+    "NODE_EXTRA_CA_CERTS": "/etc/ssl/ca.pem",
+    "HTTPS_PROXY": "http://proxy.example.test:3128",
+    "ALL_PROXY": "socks5://proxy.example.test:1080",
+    "SSL_CERT_DIR": "/etc/ssl/certs",
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "ANTHROPIC_BASE_URL": "https://gw.example.test",
+}
+BLOCKED_ENV = {
+    "PASSWORD": "SECRET-canary-password",
+    "USERNAME": "SECRET-canary-user",
+    "SMTP_PASSWORD": "SECRET-canary-smtp-pass",
+    "GOOGLE_CALENDAR_ICS_URL": "https://example.com/SECRET-canary-ics",
+    "CT_COMMUNITY_NOTES_RSS": "https://example.com/SECRET-canary-rss",
+    "HEALTHCHECK_URL": "https://hc-ping.com/SECRET-canary-hckey",
+    "OP_SERVICE_ACCOUNT_TOKEN": "SECRET-canary-op",
+}
+
+
+def test_claude_env_keeps_only_allowed_names():
+    environ = {**ALLOWED_ENV, **BLOCKED_ENV, **CLAUDE_VALUES["subscription"]}
+    env = settings.claude_env(environ)
+    assert env == {**ALLOWED_ENV, **CLAUDE_VALUES["subscription"]}
+
+
+@pytest.mark.parametrize("mode", ["api_key", "subscription"])
+def test_claude_env_never_passes_a_credential_by_prefix(mode):
+    # Each credential matches an allowed prefix (ANTHROPIC_, CLAUDE_CODE_).
+    other = {"api_key": "CLAUDE_CODE_OAUTH_TOKEN", "subscription": "ANTHROPIC_API_KEY"}[
+        mode
+    ]
+    environ = {
+        "PATH": "/usr/bin",
+        **CLAUDE_VALUES[mode],
+        "ANTHROPIC_AUTH_TOKEN": "SECRET-canary-gw",
+        other: "op://vault/item/other",
+    }
+    env = settings.claude_env(environ)
+    assert env == {"PATH": "/usr/bin", **CLAUDE_VALUES[mode]}
+
+
+# --- control characters, http and unused variables ----------------------
+
+
+@pytest.mark.parametrize("name", list(REQUIRED_VALUES))
+@pytest.mark.parametrize("char", ["\n", "\r", "\t", "\x01", "\x7f"])
+def test_check_errors_on_control_character_in_credentials(name, char):
+    values = {**REQUIRED_VALUES, name: f"SECRET-canary{char}x"}
+    result = run_cli(["check"], values)
+    assert result.returncode == 1
+    errors = [ln for ln in result.stderr.splitlines() if ln.startswith("ERROR")]
+    assert errors == [f"ERROR: {name} holds a control character"]
+    assert "SECRET-canary" not in result.stdout + result.stderr
+
+
+def test_check_accepts_printable_and_non_ascii_credentials():
+    values = {"USERNAME": "user name", "PASSWORD": 'p&w"d\\x\u00e9'}
+    result = run_cli(["check"], values)
+    assert result.returncode == 0
+    assert "ERROR" not in result.stderr
+
+
+HTTP_WARNING = {
+    var: f"WARNING: {var} uses http. The value holds a secret. Use https."
+    for var in ("HEALTHCHECK_URL", "GOOGLE_CALENDAR_ICS_URL")
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "var"),
+    [("healthcheck", "HEALTHCHECK_URL"), ("menu", "GOOGLE_CALENDAR_ICS_URL")],
+)
+@pytest.mark.parametrize("scheme", ["http", "HTTP"])
+def test_check_warns_http_url_without_value(name, var, scheme):
+    url = f"{scheme}://h.example.test/SECRET-canary-url"
+    result = run_cli(["check"], {**REQUIRED_VALUES, var: url})
+    assert result.returncode == 0
+    # The warning does not turn the feature off.
+    assert re.search(rf"^\s*{name}: on$", result.stdout, re.MULTILINE)
+    warnings = [ln for ln in result.stderr.splitlines() if "WARNING" in ln]
+    assert warnings == [HTTP_WARNING[var]]
+    assert "SECRET-canary" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("var", ["HEALTHCHECK_URL", "GOOGLE_CALENDAR_ICS_URL"])
+def test_check_gives_no_http_warning_for_https_or_a_bad_url(var):
+    for url in ("https://h.example.test/x", "http://"):
+        result = run_cli(["check"], {**REQUIRED_VALUES, var: url})
+        assert HTTP_WARNING[var] not in result.stderr
+
+
+def _set_required(monkeypatch):
+    for var, value in REQUIRED_VALUES.items():
+        monkeypatch.setenv(var, value)
+
+
+def test_check_warns_op_service_account_token_in_a_container(monkeypatch, tmp_path):
+    marker = tmp_path / ".dockerenv"
+    marker.touch()
+    monkeypatch.setattr(settings, "CONTAINER_MARKERS", (str(marker),))
+    _set_required(monkeypatch)
+    monkeypatch.setenv("OP_SERVICE_ACCOUNT_TOKEN", "SECRET-canary-op")
+    _, warnings, errors = settings.check_lines()
+    assert errors == []
+    lines = [ln for ln in warnings if "OP_SERVICE" in ln]
+    assert lines == [
+        "WARNING: OP_SERVICE_ACCOUNT_TOKEN is set. The Sommelier does not use it. "
+        "Remove it from .env."
+    ]
+    assert "SECRET-canary" not in "".join(warnings)
+
+
+def test_check_no_op_service_account_warning_on_a_host(monkeypatch, tmp_path):
+    # op run for a checkout run needs the token in the shell.
+    monkeypatch.setattr(settings, "CONTAINER_MARKERS", (str(tmp_path / "none"),))
+    _set_required(monkeypatch)
+    monkeypatch.setenv("OP_SERVICE_ACCOUNT_TOKEN", "SECRET-canary-op")
+    _, warnings, _ = settings.check_lines()
+    assert not [ln for ln in warnings if "OP_SERVICE" in ln]
+
+
+def test_check_no_op_service_account_warning_when_unset(monkeypatch, tmp_path):
+    marker = tmp_path / ".dockerenv"
+    marker.touch()
+    monkeypatch.setattr(settings, "CONTAINER_MARKERS", (str(marker),))
+    _set_required(monkeypatch)
+    monkeypatch.delenv("OP_SERVICE_ACCOUNT_TOKEN", raising=False)
+    _, warnings, _ = settings.check_lines()
+    assert not [ln for ln in warnings if "OP_SERVICE" in ln]
+
+
+# --- schedules ----------------------------------------------------------
+
+SCHEDULES = {
+    "sync_schedule": ("SYNC_SCHEDULE", "*/30 6-21 * * *;0 22 * * *"),
+    "digest_schedule": ("DIGEST_SEND_SCHEDULE", "0 8 * * *"),
+}
+
+
+@pytest.mark.parametrize("name", SCHEDULES)
+@pytest.mark.parametrize(
+    "char",
+    ["\n", "\r", "\t", "\x01", "\x7f"],
+    ids=["newline", "cr", "tab", "soh", "del"],
+)
+def test_get_schedule_rejects_control_character(name, char):
+    var, _ = SCHEDULES[name]
+    value = f"0 8 * * *{char}SECRET-canary-cmd"
+    result = run_cli(["get", name], {var: value})
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.strip() == (
+        f"ERROR: {var} holds a control character. "
+        "Use one line, with spaces between the fields."
+    )
+    assert "SECRET-canary" not in result.stderr
+
+
+@pytest.mark.parametrize("name", SCHEDULES)
+@pytest.mark.parametrize(
+    ("unset", "blank"),
+    [(True, ""), (False, ""), (False, "   ")],
+    ids=["unset", "empty", "spaces"],
+)
+def test_get_schedule_default(name, unset, blank):
+    var, default = SCHEDULES[name]
+    result = run_cli(["get", name], {} if unset else {var: blank})
+    assert result.returncode == 0
+    assert result.stdout == default + "\n"
+    # Only a value that is set but holds no entry warns.
+    assert bool(result.stderr) == bool(blank)
+
+
+@pytest.mark.parametrize("name", SCHEDULES)
+def test_get_schedule_gives_the_value(name):
+    var, _ = SCHEDULES[name]
+    result = run_cli(["get", name], {var: "*/5 * * * *"})
+    assert result.returncode == 0
+    assert result.stdout == "*/5 * * * *\n"
+
+
+def test_get_sync_schedule_gives_more_than_one_expression():
+    result = run_cli(
+        ["get", "sync_schedule"], {"SYNC_SCHEDULE": "*/5 * * * *;0 1 * * *"}
+    )
+    assert result.returncode == 0
+    assert result.stdout == "*/5 * * * *;0 1 * * *\n"
+
+
+@pytest.mark.parametrize("value", ["0 8 * * *;0 18 * * *", "0 8 * * *; ;0 18 * * *"])
+def test_get_digest_schedule_rejects_more_than_one_expression(value):
+    # entrypoint.sh writes the digest as one crontab line, and supercronic
+    # rejects the whole crontab for a ";" in it.
+    result = run_cli(["get", "digest_schedule"], {"DIGEST_SEND_SCHEDULE": value})
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.strip() == (
+        "ERROR: DIGEST_SEND_SCHEDULE holds more than one cron expression. Use one."
+    )
+
+
+@pytest.mark.parametrize("name", SCHEDULES)
+@pytest.mark.parametrize(
+    "value",
+    ["   ", ";", "  ;  ", "\u00a0", "\u00a0;\u3000"],
+    ids=["spaces", "separator", "blank_entries", "nbsp", "unicode_spaces"],
+)
+def test_get_schedule_with_no_entry_gives_the_default_and_warns(name, value):
+    # A crontab line with no schedule makes supercronic reject the whole file.
+    var, default = SCHEDULES[name]
+    result = run_cli(["get", name], {var: value})
+    assert result.returncode == 0
+    assert result.stdout == default + "\n"
+    assert result.stderr.strip() == (
+        f"WARNING: {var} has no cron expression. Using the default."
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "expected"),
+    [
+        ("sync_schedule", "*/5 * * * *;\u00a0;  ;0 1 * * *;", "*/5 * * * *;0 1 * * *"),
+        ("digest_schedule", "\u00a0;  ;0 1 * * *;", "0 1 * * *"),
+    ],
+)
+def test_get_schedule_removes_blank_entries(name, value, expected):
+    var, _ = SCHEDULES[name]
+    result = run_cli(["get", name], {var: value})
+    assert result.returncode == 0
+    assert result.stdout == expected + "\n"
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize("name", SCHEDULES)
+def test_get_schedule_rejects_a_lone_line_break(name):
+    var, _ = SCHEDULES[name]
+    result = run_cli(["get", name], {var: "\n"})
+    assert result.returncode == 1
+    assert "holds a control character" in result.stderr
