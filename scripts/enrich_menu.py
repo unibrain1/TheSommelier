@@ -8,7 +8,8 @@ Usage: enrich_menu.py <menu.json> [cache.json] [output.json]
 
 Exit codes:
   0  every entry that needed enrichment was enriched, or all were cached
-  1  no entry that needed enrichment was enriched, or a file write failed
+  1  no entry that needed enrichment was enriched, a file write failed,
+     a usage error, or a crash
   3  some, but not all, entries that needed enrichment were enriched
 """
 

@@ -197,7 +197,8 @@ def call_claude(prompt: str) -> str:
         print("WARNING: Claude CLI timed out", file=sys.stderr)
         return ""
     except FileNotFoundError as e:
-        # The CLI is not installed. Continue with no new notes, as for a timeout.
+        # The CLI is not installed. Return an empty reply, as for a timeout.
+        # The caller continues without Claude output.
         print(f"WARNING: Claude CLI could not start: {e}", file=sys.stderr)
         return ""
     if result.returncode != 0:
