@@ -1,3 +1,6 @@
+# Baseline caller from devkit (docs/baseline.md). For comment and issue
+# events, GitHub runs the copy of this file on the default branch. Change
+# it only at a milestone boundary (docs/design.html, main-match rule).
 name: Claude Code
 on:
   issue_comment:

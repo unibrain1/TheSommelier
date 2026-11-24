@@ -1,7 +1,9 @@
+# Baseline pre-commit hooks from devkit (docs/baseline.md). Each repo gets
+# the same checks. Run `pre-commit install` one time in each clone to turn
+# the hooks on.
 repos:
-  # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -10,37 +12,58 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: ['--maxkb=500']
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.24.0
+    hooks:
+      - id: markdownlint-cli2
+  # gitleaks scans only the staged files.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
 
-  # Python linting and formatting
+  # Stack hooks of this repo (Python and shell).
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.12
     hooks:
       - id: ruff
         args: ['--fix']
       - id: ruff-format
-
-  # Python type checking
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.400
     hooks:
       - id: pyright
         additional_dependencies: ['icalendar>=6.0.0', 'PyYAML>=6.0.3', 'types-PyYAML']
-
-  # Shell script linting
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.10.0.1
     hooks:
       - id: shellcheck
         args: ['-e', 'SC1091']  # Don't warn about not following sourced files
 
-  # Dockerfile linting
-  # Local hook: the upstream hook runs the untagged (latest) image, so a new
-  # hadolint release could fail this hook without a repo change. Bump the tag
-  # and the digest by hand.
+  # Family B hooks (docs/families.md).
   - repo: local
     hooks:
-      - id: hadolint-docker
-        name: Lint Dockerfiles
+      # The hadolint hook lints each Dockerfile at each commit. It runs
+      # hadolint in a Docker container, so each machine that commits needs
+      # Docker. The entry pins the image by tag and digest. The upstream
+      # hadolint-docker hook names the image with no tag, so its rev does
+      # not pin the image. Dependabot does not update this entry. Change the
+      # tag and the digest by hand.
+      - id: hadolint
+        name: hadolint
         language: docker_image
-        types: [dockerfile]
         entry: ghcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d hadolint
+        types: [dockerfile]
+      # The test-quick hook runs the fast tests (test_quick in
+      # .claude/project.md) at each commit, in about 13 seconds. It leaves
+      # out tests/test_pipeline_e2e.py, which takes about 90 seconds. CI
+      # runs the full suite. pre-commit runs entry with no shell, so the
+      # hook runs its command through bash -c.
+      - id: test-quick
+        name: test_quick
+        entry: bash
+        args:
+          - "-c"
+          - ".venv/bin/python -m pytest tests/ -q --ignore=tests/test_pipeline_e2e.py"
+        language: system
+        pass_filenames: false

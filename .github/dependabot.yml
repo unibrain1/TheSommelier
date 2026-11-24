@@ -1,59 +1,49 @@
-# All ecosystems run Monday 04:00 Pacific so PRs are open before the Monday dashboard email.
+# Baseline Dependabot config from devkit (docs/baseline.md). It bumps the
+# pinned actions one time each week, in one grouped PR. It does not bump
+# the devkit callers: the devkit pin moves only by hand, at a milestone
+# boundary (docs/ci-workflows.md, devkit pin rule).
+# This repo adds a day and a time to each entry: Monday 04:00 Pacific, so
+# the PRs are open before the Monday dashboard email.
 version: 2
 updates:
-  - package-ecosystem: "pip"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
       time: "04:00"
-      timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 5
+      timezone: America/Los_Angeles
     commit-message:
-      prefix: "Deps"
+      prefix: chore(deps)
     groups:
-      dev-dependencies:
-        dependency-type: "development"
-        update-types:
-          - "minor"
-          - "patch"
-      production-patch:
-        dependency-type: "production"
-        update-types:
-          - "patch"
-
-  - package-ecosystem: "docker"
-    directory: "/"
+      actions:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: unibrain1/devkit
+  # Family B (docs/families.md): bump the base images in the Dockerfile
+  # one time each week, in one grouped PR.
+  - package-ecosystem: docker
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
       time: "04:00"
-      timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 5
+      timezone: America/Los_Angeles
     commit-message:
-      prefix: "Deps"
+      prefix: chore(deps)
     groups:
-      minor-and-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
+      docker:
+        patterns: ["*"]
+  # The packages of the stack, one time each week, in one grouped PR.
+  - package-ecosystem: pip
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
       time: "04:00"
-      timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 5
+      timezone: America/Los_Angeles
     commit-message:
-      prefix: "Deps"
+      prefix: chore(deps)
     groups:
-      minor-and-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
+      stack:
+        patterns: ["*"]

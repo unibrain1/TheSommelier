@@ -30,7 +30,6 @@ cp config/evolution_tracks.yaml.sample config/evolution_tracks.yaml
 # Edit config/holidays.yaml and config/evolution_tracks.yaml for your cellar
 ```
 
-
 ```bash
 bash fetch.sh
 # Serve the site:
@@ -49,7 +48,7 @@ The tests in `tests/test_docker_image.py` build and run the image. They take min
 SOMMELIER_DOCKER_TESTS=1 .venv/bin/python -m pytest tests/test_docker_image.py -q --tb=short
 ```
 
-CI runs both on each pull request and on each push to `main` and to a `milestone/**` branch (`.github/workflows/tests.yml`). The test that needs `SOMMELIER_CLAUDE_TEST_TOKEN` stays skipped in CI.
+CI runs both on each pull request and on each push to `main` and to a `milestone/**` branch (`.github/workflows/ci.yml`). The test that needs `SOMMELIER_CLAUDE_TEST_TOKEN` stays skipped in CI.
 
 ## Build the image
 

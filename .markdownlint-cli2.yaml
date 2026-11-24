@@ -1,0 +1,13 @@
+# markdownlint-cli2 settings. Line length (MD013) is off: the existing docs
+# use long lines, and a wrap gives no value for a rendered page.
+config:
+  MD013: false
+  MD024:
+    siblings_only: true
+  # The docs quote the comment mark "# " with its space, as a user types it.
+  MD038: false
+  # Agent and skill files start with YAML front matter, not a heading.
+  MD041: false
+  # The README centers the logo with HTML.
+  MD033:
+    allowed_elements: [p, img]

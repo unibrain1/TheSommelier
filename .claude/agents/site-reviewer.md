@@ -37,6 +37,7 @@ Follow these steps:
 ## Output Format
 
 For each issue found:
+
 - **File**: which file
 - **Line**: approximate line number
 - **Severity**: CRITICAL (breaks rendering), WARNING (edge case or missing null check), INFO (suggestion)

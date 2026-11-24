@@ -6,6 +6,7 @@ backticks. The keys are in
 <https://github.com/unibrain1/devkit/blob/main/docs/project-md.md>.
 
 - test: `.venv/bin/python -m pytest tests/ -v --tb=short`
+- test_quick: `.venv/bin/python -m pytest tests/ -q --ignore=tests/test_pipeline_e2e.py`
 - lint: `pre-commit run --all-files`
 - plans: `plans`
 - release_notes: `docs/releases/{version}.md`

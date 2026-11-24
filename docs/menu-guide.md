@@ -11,7 +11,7 @@ The sync reads your meals from a Google Calendar (see [Menu plan setup](menu-pla
 ## Best format
 
 | Field | Example |
-|---|---|
+| --- | --- |
 | **Title** | `Grilled Lamb Chops` |
 | **Description** (optional) | `Italian style, with risotto` |
 
@@ -28,13 +28,17 @@ The sync reads both the title and the description, so you can be brief.
 ## Recognized keywords
 
 The sync matches these words in the title and the description.
+
 ### Proteins
+
 beef, steak, ribeye, filet, brisket, burger, short ribs, ribs, corned beef, lamb, veal, venison, elk, bison, pork, sausage, chops, pulled pork, carnitas, bacon, ham, chicken, turkey, duck, quail, cornish hen, salmon, tuna, halibut, cod, trout, swordfish, mahi, shrimp, crab, lobster, scallops, oysters, mussels, clams, fish, seafood, shellfish
 
 ### Cuisines
+
 italian, french, japanese, thai, mexican, indian, chinese, korean, mediterranean, greek, spanish, bbq, barbecue, grilled, braised, roasted, smoked
 
 ### Dishes / Styles
+
 salad, soup, pasta, risotto, pizza, taco, tacos, burrito, enchilada, quesadilla, curry, stew, chili, casserole, sandwich, lasagna, noodle, ramen, pho, udon, soba, mac, shepherd, beans, lentil, tofu, tempeh, vegetarian, vegan
 
 ## Not supported
