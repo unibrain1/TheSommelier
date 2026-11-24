@@ -34,6 +34,15 @@ updates:
     groups:
       docker:
         patterns: ["*"]
+    # This repo also skips Python minor and major versions. A new minor
+    # version needs ci.yml and the digest guard test to change too, so the
+    # project moves to it on purpose (issue #164). Digest and patch updates
+    # of the current minor version still come.
+    ignore:
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
   # The packages of the stack, one time each week, in one grouped PR.
   - package-ecosystem: pip
     directory: /
