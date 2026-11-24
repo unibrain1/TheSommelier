@@ -1,4 +1,7 @@
-"""Static checks of the CI workflow that runs the lint and the tests."""
+"""Static checks of the CI workflow that runs the lint and the tests.
+
+The workflow file is .github/workflows/ci.yml.
+"""
 
 import re
 from pathlib import Path
