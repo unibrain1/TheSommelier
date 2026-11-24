@@ -26,7 +26,9 @@ Add meal events to any Google Calendar. Name each event after the meal, for exam
 2. Click the **⋮** menu next to your meal plan calendar, then **Settings and sharing**.
 3. Scroll to **Integrate calendar**.
 4. Copy the **Secret address in iCal format**. It looks like this:
-   ```
+
+   ```text
    https://calendar.google.com/calendar/ical/...%40group.calendar.google.com/private-.../basic.ics
    ```
+
 5. Add it to your `.env` as `GOOGLE_CALENDAR_ICS_URL`. Keep it private.

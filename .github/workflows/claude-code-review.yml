@@ -1,3 +1,6 @@
+# Baseline caller from devkit (docs/baseline.md). The review workflow
+# compares this file with the default branch. Change it only at a
+# milestone boundary (docs/design.html, main-match rule).
 name: Claude Code Review
 on:
   pull_request:
@@ -19,22 +22,5 @@ jobs:
     uses: unibrain1/devkit/.github/workflows/claude-review.yml@main
     with:
       pr_number: ${{ inputs.pr_number }}
-      extra_instructions: |
-        Pipeline and scripts:
-        - Blocking: a script swallows an error instead of failing loudly.
-        - Blocking: the JSON data contracts between scripts do not agree.
-        - Blocking: the pipeline runs a step before the step it depends on.
-        - Important: an error message goes to stdout instead of stderr.
-        - Important: a broad exception catch hides a programming error.
-
-        Security:
-        - Blocking: a secret or credential can go into a log or the output.
-        - Blocking: unsanitized input can cause command injection.
-        - Important: a 1Password reference is used where a literal value is expected.
-
-        Code quality:
-        - Blocking: a script copies a shared utility from wine_utils.py.
-        - Important: new functionality has no test.
-        - Important: CLAUDE.md is not updated for a new script, env var or pipeline change.
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

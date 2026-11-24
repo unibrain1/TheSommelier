@@ -31,7 +31,7 @@ Two compose files:
 
 `.github/workflows/publish-image.yml` builds the image for amd64 and arm64. A `vX.Y.Z` tag pushes `X.Y.Z`, `X.Y` and `latest`. A push to `main` or to a `milestone/**` branch pushes `edge`. A manual run needs the workflow file on `main`, and a manual run on a branch also pushes `edge`. A manual run on a tag fails, because only a version tag push can write a release tag. A pull request that changes an image file builds only. A prerelease tag (with `-`) does not push `latest`.
 
-`.github/workflows/tests.yml` runs pytest on each pull request and on a push to `main` or `milestone/**`. A second job builds the image and runs `tests/test_docker_image.py` with `SOMMELIER_DOCKER_TESTS=1`.
+`.github/workflows/ci.yml` (devkit Family B) runs on each pull request and on a push to `main` or `milestone/**`. Its `App` job runs the lint (`pre-commit run --all-files`, without the `test-quick` hook) and the full pytest suite. The `docker-tests` job builds the image and runs `tests/test_docker_image.py` with `SOMMELIER_DOCKER_TESTS=1`. `.github/workflows/secrets-scan.yml` runs the devkit trufflehog scan on each pull request and on a push to `main`.
 
 The morning digest embeds `site/logo.png`. The script looks for it in the code folder, not in `SITE_DIR`. If the file is missing, the digest uses `SITE_URL` + `/logo.png`. If `SITE_URL` is not set, or is not an `http://` or `https://` URL, the digest has no logo and logs a warning. `SITE_URL` is optional and goes in `.env`.
 
@@ -55,6 +55,7 @@ The image has a `HEALTHCHECK` that runs `scripts/container_health.py`. The check
 ## Plan Generation Rules
 
 Implemented in `scripts/generate_plan.py`:
+
 - Cadence: 1 bottle/week, 52 weeks, starting current Monday
 - Priority: past peak → expiring → peak window → entering window → long-agers (held)
 - Long-ager hold: BeginConsume > current_year + 2, or hold back 2 if 3+ bottles

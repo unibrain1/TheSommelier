@@ -1,4 +1,4 @@
-"""Static checks of the workflow that runs the tests in CI."""
+"""Static checks of the CI workflow that runs the lint and the tests."""
 
 import re
 from pathlib import Path
@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent
-WORKFLOW = REPO / ".github/workflows/tests.yml"
+WORKFLOW = REPO / ".github/workflows/ci.yml"
 
 
 @pytest.fixture(scope="module")
@@ -61,8 +61,24 @@ def test_the_python_version_is_the_one_of_the_image(workflow):
         assert setup["with"]["python-version"] == image_version.group(1)
 
 
-def test_the_pytest_job_runs_the_full_suite(workflow):
-    assert "python -m pytest tests/ -q --tb=short" in _runs(workflow, "pytest")
+def test_the_app_job_runs_the_full_suite(workflow):
+    assert "python -m pytest tests/ -q --tb=short" in _runs(workflow, "app")
+
+
+def test_the_app_job_runs_the_lint_key_without_the_test_quick_hook(workflow):
+    lint = next(s for s in workflow["jobs"]["app"]["steps"] if s.get("name") == "Lint")
+    project = (REPO / ".claude/project.md").read_text(encoding="utf-8")
+    lint_key = re.search(r"^- lint: `([^`]+)`$", project, re.M)
+
+    assert lint_key
+    assert lint["run"].startswith(lint_key.group(1))
+    # The test-quick hook needs the local .venv. The Test step runs the full suite.
+    assert lint["env"] == {"SKIP": "test-quick"}
+
+
+def test_the_app_job_keeps_the_family_check_name(workflow):
+    # The check name "App" is the same in each Family B repo.
+    assert workflow["jobs"]["app"]["name"] == "App"
 
 
 def test_the_docker_job_turns_on_the_docker_tests_without_a_claude_token(workflow):

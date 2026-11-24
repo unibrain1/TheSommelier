@@ -23,7 +23,7 @@ Run the full pipeline end-to-end and validate all generated outputs.
    For each of these files, verify it exists, is valid JSON, and has expected top-level keys:
 
    | File | Expected Keys |
-   |------|---------------|
+   | --- | --- |
    | `data/plan.json` | `allWeeks` (array of 52), `quarterInfo`, `changelog` |
    | `data/inventory.json` | non-empty array of wine objects |
    | `data/menu.json` | array of meal objects (only when the menu feature is on) |

@@ -12,6 +12,7 @@ You are a specialized reviewer for The Sommelier's data pipeline. Your job is to
 ### JSON Contract
 
 For any script that produces JSON output, verify:
+
 - `generate_plan.py` → `data/plan.json` with keys: `allWeeks` (52 entries), `quarterInfo`, `changelog`
 - `parse_inventory.py` → `data/inventory.json` (array of wine objects)
 - `parse_menu.py` → `data/menu.json` (array of meal objects)
@@ -24,6 +25,7 @@ Check that changes don't break the expected JSON schema that `site/index.html` c
 ### Pipeline Order
 
 The pipeline must execute in this order:
+
 1. Fetch (CellarTracker inventory + notes + food tags, Google Calendar menu only when the menu feature is on) — parallel OK
 2. Parse (inventory.tsv → .json, menu.ics → .json, menu only when the menu feature is on) — after fetch
 3. Generate plan (inventory.json → plan.json) — after parse
@@ -55,6 +57,7 @@ Verify changes don't violate ordering dependencies.
 ## Output Format
 
 For each issue found, report:
+
 - **File**: which file has the issue
 - **Line**: approximate line number
 - **Severity**: CRITICAL (breaks pipeline), WARNING (potential issue), INFO (suggestion)
