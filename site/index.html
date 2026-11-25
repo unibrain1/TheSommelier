@@ -167,9 +167,9 @@ function renderPairingsHtml(pairings) {
       var sbBadge = (sb.type || '').toLowerCase().replace('rosé','rose');
       if (sb.varietal && sb.varietal.toLowerCase().indexOf('sparkling') >= 0) sbBadge = 'sparkling';
       icon = wineIcon(sbBadge || 'red', 18);
-      detail = 'The Sommelier suggests: ' + sb.vintage + ' ' + sb.wine;
+      detail = 'The Sommelier suggests: ' + escapeHtml(sb.vintage) + ' ' + escapeHtml(sb.wine);
       var meta = [];
-      if (sb.window && sb.window !== '?–?') meta.push('Window <span>' + sb.window + '</span>');
+      if (sb.window && sb.window !== '?–?') meta.push('Window <span>' + escapeHtml(sb.window) + '</span>');
       if (sb.score) meta.push('Score <span>CT' + Math.round(sb.score) + '</span>');
       if (meta.length) detail += '<div class="pairing-meta">' + meta.join(' &nbsp;&middot;&nbsp; ') + '</div>';
     } else if (score === 'good') {
@@ -185,7 +185,7 @@ function renderPairingsHtml(pairings) {
     }
     html += '<div class="pairing-row ' + cls + '">' +
       '<span class="pairing-icon">' + icon + '</span>' +
-      '<div><span class="pairing-meal">' + p.dayName + ': ' + s.meal + '</span>' + confBadge +
+      '<div><span class="pairing-meal">' + escapeHtml(p.dayName) + ': ' + escapeHtml(s.meal) + '</span>' + confBadge +
       (detail ? '<div class="pairing-detail">' + detail + '</div>' : '') +
       '</div></div>';
   }
@@ -240,8 +240,9 @@ function renderCalendar() {
       entries.forEach(function(w) {
         const pillClass = w.evolution ? 'evolution-pill' : w.urgent ? 'urgent-pill' : w.special ? 'special-pill' : '';
         const typeColor = typeColors[w.badge] || '#8b2035';
-        const label = w.badge === 'rose' ? 'Rosé' : w.badge.charAt(0).toUpperCase() + w.badge.slice(1);
-        const dayStr = w.date.split(',')[0];
+        const badge = safeBadge(w.badge);
+        const label = badgeLabel(badge);
+        const dayStr = String(w.date).split(',')[0];
         const flags = [];
         if (w.urgent)    flags.push('<span class="cal-flag urgent">⚠ Urgent</span>');
         if (w.evolution) flags.push('<span class="cal-flag evolution">◉ Evolution</span>');
@@ -249,11 +250,11 @@ function renderCalendar() {
         else if (w.special && !w.evolution) flags.push('<span class="cal-flag special">◆ Special</span>');
         const entry = document.createElement('div');
         entry.className = 'cal-entry';
-        entry.innerHTML = '<div class="cal-week-pill ' + pillClass + '">' + w.week + '</div>' +
-          '<div class="cal-type-dot">' + wineIcon(w.badge, 14) + '</div>' +
+        entry.innerHTML = '<div class="cal-week-pill ' + pillClass + '">' + escapeHtml(w.week) + '</div>' +
+          '<div class="cal-type-dot">' + wineIcon(badge, 14) + '</div>' +
           '<div class="cal-entry-body">' +
-            '<div class="cal-entry-date">' + dayStr + ' &nbsp;·&nbsp; ' + label + '</div>' +
-            '<div class="cal-entry-name"><span class="cal-entry-vintage">' + w.vintage + '</span> ' + w.name + '</div>' +
+            '<div class="cal-entry-date">' + escapeHtml(dayStr) + ' &nbsp;·&nbsp; ' + label + '</div>' +
+            '<div class="cal-entry-name"><span class="cal-entry-vintage">' + escapeHtml(w.vintage) + '</span> ' + escapeHtml(w.name) + '</div>' +
             '<div class="cal-entry-sub">' + escapeHtml(w.appellation.split(' · ')[0]) + '</div>' +
             (flags.length ? '<div class="cal-entry-flags">' + flags.join('') + '</div>' : '') +
           '</div>';
@@ -332,7 +333,7 @@ function renderChangeCell(changes, type) {
     items.forEach(function(c) {
       var div = document.createElement('div');
       div.className = 'changelog-wine changelog-' + type;
-      var pill = c.week != null ? '<span class="changelog-wine-pill">Wk ' + c.week + '</span>' : '';
+      var pill = c.week != null ? '<span class="changelog-wine-pill">Wk ' + escapeHtml(c.week) + '</span>' : '';
       div.innerHTML = pill + escapeHtml(c.description);
       td.appendChild(div);
     });
@@ -357,6 +358,16 @@ function escapeHtml(str) {
   var div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+// escapeHtml() does not escape quotes, so a badge from JSON must not reach a
+// class attribute. Only a known badge passes.
+function safeBadge(badge) {
+  return Object.prototype.hasOwnProperty.call(typeColors, badge) ? badge : 'red';
+}
+
+function badgeLabel(badge) {
+  return badge === 'rose' ? 'Rosé' : badge.charAt(0).toUpperCase() + badge.slice(1);
 }
 
 let currentYear = 'y1';
@@ -397,9 +408,9 @@ function renderPlan() {
       const section = document.createElement('section');
       section.className = 'quarter';
       section.innerHTML = '<div class="quarter-header">' +
-        '<h2 class="quarter-title">' + info.title + '</h2>' +
-        '<span class="quarter-sub">' + info.sub + '</span>' +
-        '<span class="quarter-note">' + info.note + '</span>' +
+        '<h2 class="quarter-title">' + escapeHtml(info.title) + '</h2>' +
+        '<span class="quarter-sub">' + escapeHtml(info.sub) + '</span>' +
+        '<span class="quarter-note">' + escapeHtml(info.note) + '</span>' +
         '</div><div class="weeks-grid" id="grid-' + yr + '-' + season + '"></div>';
       plan.appendChild(section);
       const grid = section.querySelector('#grid-' + yr + '-' + season);
@@ -407,15 +418,16 @@ function renderPlan() {
         const cls = w.evolution ? 'evolution-card' : w.urgent ? 'urgent' : (w.special ? 'special' : '');
         const card = document.createElement('div');
         card.className = 'week-card' + (cls ? ' ' + cls : '');
-        const label = w.badge === 'rose' ? 'Rosé' : w.badge.charAt(0).toUpperCase() + w.badge.slice(1);
-        let html = '<div class="card-top"><span class="week-num">Week ' + w.week + '</span><span class="week-date">' + w.date + '</span></div>';
-        html += '<div class="badge badge-' + w.badge + '">' + wineIcon(w.badge, 14) + label + '</div>';
-        html += '<div class="wine-name"><span class="wine-vintage">' + w.vintage + '</span> ' + w.name + '</div>';
+        const badge = safeBadge(w.badge);
+        const label = badgeLabel(badge);
+        let html = '<div class="card-top"><span class="week-num">Week ' + escapeHtml(w.week) + '</span><span class="week-date">' + escapeHtml(w.date) + '</span></div>';
+        html += '<div class="badge badge-' + badge + '">' + wineIcon(badge, 14) + label + '</div>';
+        html += '<div class="wine-name"><span class="wine-vintage">' + escapeHtml(w.vintage) + '</span> ' + escapeHtml(w.name) + '</div>';
         html += '<div class="wine-appellation">' + escapeHtml(w.appellation) + '</div>';
         if (w.window || w.score) {
           html += '<div class="wine-meta">';
-          if (w.window) html += '<div class="meta-item">Window <span>' + w.window + '</span></div>';
-          if (w.score)  html += '<div class="meta-item">Score <span>' + w.score + '</span></div>';
+          if (w.window) html += '<div class="meta-item">Window <span>' + escapeHtml(w.window) + '</span></div>';
+          if (w.score)  html += '<div class="meta-item">Score <span>' + escapeHtml(w.score) + '</span></div>';
           html += '</div>';
         }
         if (w.occasion)  html += '<div class="occasion-tag">' + occasionIcon(w.occasion) + ' ' + escapeHtml(w.occasion) + '</div>';
@@ -505,7 +517,7 @@ Promise.all([
   document.getElementById('plan').innerHTML =
     '<div style="padding:48px;text-align:center;color:#8e8c84;">' +
     '<h2>Unable to load the wine plan</h2>' +
-    '<p>Please try refreshing the page. (' + err.message + ')</p></div>';
+    '<p>Please try refreshing the page. (' + escapeHtml(err.message) + ')</p></div>';
 });
 
 // The version is not in the Promise.all above, so a missing version.json never stops the page.
