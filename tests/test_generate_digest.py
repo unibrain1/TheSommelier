@@ -253,8 +253,9 @@ class TestFormatDigestHtml:
 
     def test_data_values_are_escaped(self):
         attack = "<script>alert(1)</script>"
-        wine = _week("2026-04-13", name=f'Wine "{attack}"', vintage=attack)
-        wine["note"] = attack
+        amp_attack = "Tom & Jerry <script>x</script>"
+        wine = _week("2026-04-13", name=f'Wine "{amp_attack}"', vintage=attack)
+        wine["note"] = amp_attack
         wine["location"] = attack
         wine["window"] = attack
         wine["score"] = attack
@@ -282,6 +283,8 @@ class TestFormatDigestHtml:
 
         assert "<script>" not in html
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+        assert "Tom & Jerry" not in html
+        assert "Tom &amp; Jerry &lt;script&gt;x&lt;/script&gt;" in html
         assert "Wine &quot;" in html
 
     def test_meal_of_a_good_pairing_is_escaped(self):
