@@ -305,6 +305,19 @@ class TestReadCache:
         with pytest.raises(CorruptCacheError):
             read_cache(p)
 
+    def test_read_error_raises_cache_read_error(self, tmp_path):
+        p = tmp_path / "folder.json"
+        p.mkdir()
+        with pytest.raises(fcn.CacheReadError):
+            read_cache(p)
+
+    def test_bytes_that_are_not_utf8_raise_corrupt_not_read_error(self, tmp_path):
+        p = tmp_path / "latin1.json"
+        p.write_bytes(b'{"a": "\xff"}')
+        with pytest.raises(CorruptCacheError) as info:
+            read_cache(p)
+        assert not isinstance(info.value, fcn.CacheReadError)
+
 
 # ---------------------------------------------------------------------------
 # Fetch error text
@@ -464,6 +477,23 @@ class TestFetchExitCodes:
         err = capsys.readouterr().err
         assert f"ERROR: community notes cache {cache} is corrupt" in err
         assert "not overwritten" in err
+
+    def test_unreadable_cache_returns_1_without_delete_advice(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        _serve(monkeypatch, SAMPLE_RSS)
+        cache = tmp_path / "community_notes.json"
+        # A folder at the cache path gives an OSError on read, not bad JSON.
+        cache.mkdir()
+
+        assert fcn.fetch_community_notes(FEED_URL, cache) == 1
+
+        assert cache.is_dir()
+        err = capsys.readouterr().err
+        assert f"ERROR: community notes cache {cache} could not be read" in err
+        assert "not overwritten" in err
+        assert "corrupt" not in err
+        assert "delete" not in err
 
     def test_write_failure_returns_1(self, tmp_path, monkeypatch, capsys):
         _serve(monkeypatch, SAMPLE_RSS)

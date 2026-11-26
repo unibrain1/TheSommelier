@@ -599,6 +599,13 @@ def _community_ping(harness, feed: str | None = None):
     return result, listed
 
 
+def test_clean_community_feed_adds_no_warning_to_the_success_ping(harness):
+    # Without this test, a mapping that warns on exit 0 passes the suite.
+    _, listed = _community_ping(harness)
+
+    assert not [line for line in listed if "Community notes" in line]
+
+
 def test_community_feed_that_is_html_is_listed_in_the_success_ping(harness):
     # A CK token that stops working gives an HTML login page, not RSS.
     result, listed = _community_ping(

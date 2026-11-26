@@ -13,6 +13,7 @@ Usage: enrich_menu.py <menu.json> [cache.json] [output.json]
 
 Exit codes:
   0  every entry that needed enrichment was enriched, or all were cached
+     (a fresh marker counts as cached)
   1  no entry that needed enrichment was enriched, a file write failed,
      a missing argument, or a crash
   3  some, but not all, entries that needed enrichment were enriched
@@ -287,13 +288,17 @@ def enrich_menu(
     # Separate cached vs uncached entries
     results = []
     to_enrich = []  # (index_in_results, entry)
+    # The count keeps the log line from saying that every meal is enriched.
+    marked = 0
 
     for entry in menu:
         h = text_hash(entry["meal"])
         if h in cache:
             # The marker stays in the cache file only, so that pairing and
             # menu_enriched_full.json see one form for "not enriched".
-            enriched = None if _is_marker(cache[h]) else cache[h]
+            is_marked = _is_marker(cache[h])
+            marked += is_marked
+            enriched = None if is_marked else cache[h]
             results.append(
                 {"raw": entry["meal"], "hash": h, "enriched": enriched, **entry}
             )
@@ -301,9 +306,6 @@ def enrich_menu(
             results.append({"raw": entry["meal"], "hash": h, "enriched": None, **entry})
             to_enrich.append((len(results) - 1, entry))
 
-    # A marked meal is a cache hit with no enrichment. The count keeps the
-    # log line from saying that every meal is enriched.
-    marked = sum(1 for r in results if r["hash"] in cache and r["enriched"] is None)
     marked_note = f" ({marked} marked as not enriched)" if marked else ""
 
     if not to_enrich:
@@ -337,7 +339,7 @@ def enrich_menu(
 
     # Map enrichments back to results
     enriched_count = 0
-    for batch_idx, (result_idx, entry) in enumerate(to_enrich):
+    for batch_idx, (result_idx, _) in enumerate(to_enrich):
         h = results[result_idx]["hash"]
         raw = enrichments.get(str(batch_idx))
         if raw is None:
@@ -350,8 +352,8 @@ def enrich_menu(
             # same Claude call on each run until it expires.
             retry = today + timedelta(days=MARKER_MAX_AGE_DAYS)
             _warn(
-                f"entry {h} had no usable field — cached as not enriched "
-                f"until {retry.isoformat()}"
+                f"entry {h} had no usable field — cached as not enriched, "
+                f"retry on {retry.isoformat()}"
             )
             cache[h] = {MARKER_KEY: today.isoformat()}
             continue
@@ -423,8 +425,9 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    # Exit 3 is a partial result. pipeline.sh treats each other non-zero code
-    # as a failed enrichment step.
+    # Exit 3 is a partial result, and pipeline.sh warns "Menu enrichment
+    # incomplete". Each other non-zero code gets the warning "Menu enrichment
+    # failed". The run continues in both cases.
     print(
         f"WARNING: {result.needed - result.enriched} of {result.needed} "
         "menu entries not enriched",

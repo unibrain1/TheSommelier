@@ -429,7 +429,7 @@ class TestEnrichMenuMarker:
         lines = [line for line in capsys.readouterr().err.splitlines() if h in line]
         assert lines == [
             f"WARNING: enrichment entry {h} had no usable field — "
-            "cached as not enriched until 2026-06-12"
+            "cached as not enriched, retry on 2026-06-12"
         ]
         assert "Pork" not in "\n".join(lines)
 

@@ -12,7 +12,8 @@ Env:   CT_COMMUNITY_NOTES_RSS must be set to the RSS feed URL.
 Exit codes:
   0  the feed was read and every item was merged, or the feed has no items
   1  a fetch error, a body that is not an RSS feed, every item was skipped, a corrupt
-     cache, a failed write, no CT_COMMUNITY_NOTES_RSS, or a crash
+     cache or a cache that cannot be read, a failed write, no
+     CT_COMMUNITY_NOTES_RSS, or a crash
   3  some, but not all, items were skipped (no iWine or no iNote). The cache
      was written.
 """
@@ -138,17 +139,32 @@ class CorruptCacheError(Exception):
     """The cache file exists but does not hold a JSON object."""
 
 
+class CacheReadError(CorruptCacheError):
+    """The cache file cannot be read, for example because of a permission error.
+
+    The file can hold good history, so the fetch must not tell the operator to
+    delete it.
+    """
+
+
 def read_cache(cache_path: Path) -> dict[str, list[dict]]:
     """Read the cumulative cache (keyed by iWine).
 
-    A missing or empty file gives {}. Raises CorruptCacheError when the file
-    cannot be read, is not JSON, or is not a JSON object.
+    A missing or empty file gives {}. Raises CacheReadError when the file
+    cannot be read. Raises CorruptCacheError when the file is not JSON or is
+    not a JSON object.
     """
     try:
         if not cache_path.exists() or cache_path.stat().st_size == 0:
             return {}
-        data = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        text = cache_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise CorruptCacheError(f"{type(e).__name__}: {e}") from e
+    except OSError as e:
+        raise CacheReadError(f"{type(e).__name__}: {e}") from e
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
         raise CorruptCacheError(f"{type(e).__name__}: {e}") from e
     if not isinstance(data, dict):
         raise CorruptCacheError(f"JSON {type(data).__name__}, not an object")
@@ -225,8 +241,9 @@ def fetch_community_notes(rss_url: str, cache_path: Path) -> int:
     try:
         new_notes, skipped = parse_rss(xml_text)
     except NotRssError as e:
-        # The body can be an HTML login page. The error holds no feed text,
-        # and the URL holds the CK token, so neither goes in the log.
+        # The body can be an HTML login page. The log shows the error, which
+        # holds no feed text. The log does not show the body or the URL,
+        # because the URL holds the CK token.
         print(
             f"ERROR: RSS body is not an RSS feed ({e}) — check CT_COMMUNITY_NOTES_RSS",
             file=sys.stderr,
@@ -237,6 +254,13 @@ def fetch_community_notes(rss_url: str, cache_path: Path) -> int:
     # replace the cumulative history with only this feed.
     try:
         cache = read_cache(cache_path)
+    except CacheReadError as e:
+        print(
+            f"ERROR: community notes cache {cache_path} could not be read ({e}) — "
+            "not overwritten. Check the file permissions and the data mount.",
+            file=sys.stderr,
+        )
+        return 1
     except CorruptCacheError as e:
         print(
             f"ERROR: community notes cache {cache_path} is corrupt ({e}) — "
