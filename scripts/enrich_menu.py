@@ -3,19 +3,26 @@
 
 For each menu entry, extracts structured food features using Claude.
 Caches results keyed by raw text hash so unchanged entries aren't re-enriched.
+A cache value of {"not_enriched_on": "YYYY-MM-DD"} is a marker. It means that
+Claude answered for the meal but gave no usable field. The marker stops a new
+Claude call for that meal on the marker date and the day after it. It expires
+MARKER_MAX_AGE_DAYS calendar days after the marker date, and then the meal goes
+to Claude again.
 
 Usage: enrich_menu.py <menu.json> [cache.json] [output.json]
 
 Exit codes:
   0  every entry that needed enrichment was enriched, or all were cached
+     (a fresh marker counts as cached)
   1  no entry that needed enrichment was enriched, a file write failed,
-     a usage error, or a crash
+     a missing argument, or a crash
   3  some, but not all, entries that needed enrichment were enriched
 """
 
 import hashlib
 import json
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 from typing import NamedTuple
 
@@ -79,6 +86,11 @@ ENUM_VALUES: dict[str, frozenset[str]] = {
 MAX_FIELD_CHARS = 80
 MAX_LIST_ITEMS = 5
 
+# A marker is the cache value for a meal that Claude answered with no usable
+# field. It expires, so that a meal that comes back on the menu gets a new try.
+MARKER_KEY = "not_enriched_on"
+MARKER_MAX_AGE_DAYS = 2
+
 
 def text_hash(text: str) -> str:
     """Stable hash of menu text for cache keying."""
@@ -122,14 +134,44 @@ Menu entries:
 {items_text}"""
 
 
-def load_cache(cache_path: Path) -> dict[str, dict]:
+def _is_marker(entry: object) -> bool:
+    """Return True if the cache entry is a not-enriched marker."""
+    return isinstance(entry, dict) and len(entry) == 1 and MARKER_KEY in entry
+
+
+def _marker_is_fresh(entry: dict, today: date) -> bool:
+    """Return True if the marker date is valid and less than MARKER_MAX_AGE_DAYS old.
+
+    The age is in calendar days, so a marker written late on day D expires on
+    day D + MARKER_MAX_AGE_DAYS like one written early. A date that does not
+    parse, or a date after today, counts as expired.
+    """
+    value = entry.get(MARKER_KEY)
+    if not isinstance(value, str):
+        return False
+    try:
+        marked = date.fromisoformat(value)
+    except ValueError:
+        return False
+    return 0 <= (today - marked).days < MARKER_MAX_AGE_DAYS
+
+
+def load_cache(cache_path: Path, today: date | None = None) -> dict[str, dict]:
     """Load enrichment cache (keyed by text hash), with each entry checked again.
 
-    An older release cached LLM output with no check. Each entry is checked,
-    also one for a meal that is not on the menu now, because _write_files
-    writes the whole cache back. An entry with no usable field is dropped, so
-    its meal is enriched again.
+    A fresh marker stays in the cache, so its meal gets no Claude call. An
+    expired or bad marker is dropped, so its meal goes to Claude again. The
+    marker check comes first, because _validate_enriched drops the unknown
+    marker key.
+
+    An older release cached LLM output with no check. Each other entry is
+    checked, also one for a meal that is not on the menu now, because
+    _write_files writes the whole cache back. An entry with no usable field is
+    dropped, so its meal is enriched again.
+
+    today is the date of the run. Tests set it. The default is date.today().
     """
+    today = today or date.today()
     if not (cache_path.exists() and cache_path.stat().st_size > 0):
         return {}
     try:
@@ -140,8 +182,16 @@ def load_cache(cache_path: Path) -> dict[str, dict]:
     if not isinstance(data, dict):
         _warn(f"cache was {type(data).__name__}, not an object — cache ignored")
         return {}
-    checked = {h: _validate_enriched(entry) for h, entry in data.items()}
-    return {h: entry for h, entry in checked.items() if entry is not None}
+    cache: dict[str, dict] = {}
+    for h, entry in data.items():
+        if _is_marker(entry):
+            if _marker_is_fresh(entry, today):
+                cache[h] = entry
+            continue
+        checked = _validate_enriched(entry)
+        if checked is not None:
+            cache[h] = checked
+    return cache
 
 
 def _warn(message: str) -> None:
@@ -219,37 +269,58 @@ def _validate_enriched(enriched: object) -> dict | None:
 
 
 def enrich_menu(
-    menu_path: Path, cache_path: Path, output_path: Path | None = None
+    menu_path: Path,
+    cache_path: Path,
+    output_path: Path | None = None,
+    today: date | None = None,
 ) -> EnrichResult:
     """Enrich menu entries with LLM-extracted food features.
 
     Return the entries, how many needed enrichment, how many got it, and
-    whether the files were written.
+    whether the files were written. A meal with a marker in the cache gets
+    "enriched": None. today is the date of the run, and the default is
+    date.today().
     """
+    today = today or date.today()
     menu = json.loads(menu_path.read_text(encoding="utf-8"))
-    cache = load_cache(cache_path)
+    cache = load_cache(cache_path, today)
 
     # Separate cached vs uncached entries
     results = []
     to_enrich = []  # (index_in_results, entry)
+    # The count keeps the log line from saying that every meal is enriched.
+    marked = 0
 
     for entry in menu:
         h = text_hash(entry["meal"])
         if h in cache:
+            # The marker stays in the cache file only, so that pairing and
+            # menu_enriched_full.json see one form for "not enriched".
+            is_marked = _is_marker(cache[h])
+            marked += is_marked
+            enriched = None if is_marked else cache[h]
             results.append(
-                {"raw": entry["meal"], "hash": h, "enriched": cache[h], **entry}
+                {"raw": entry["meal"], "hash": h, "enriched": enriched, **entry}
             )
         else:
             results.append({"raw": entry["meal"], "hash": h, "enriched": None, **entry})
             to_enrich.append((len(results) - 1, entry))
 
+    marked_note = f" ({marked} marked as not enriched)" if marked else ""
+
     if not to_enrich:
-        print(f"Menu enrichment: all {len(menu)} entries cached, nothing to enrich.")
+        print(
+            f"Menu enrichment: all {len(menu)} entries cached{marked_note}, "
+            "nothing to enrich."
+        )
         written = _write_files(results, cache, cache_path, output_path)
         return EnrichResult(results, needed=0, enriched=0, written=written)
 
     cache_hits = len(menu) - len(to_enrich)
-    print(f"Menu enrichment: {cache_hits} cached, {len(to_enrich)} to enrich...")
+    print(
+        f"Menu enrichment: {cache_hits} cached{marked_note}, "
+        f"{len(to_enrich)} to enrich..."
+    )
 
     # Batch all uncached entries in one Claude call
     entries_to_enrich = [e for _, e in to_enrich]
@@ -268,16 +339,27 @@ def enrich_menu(
 
     # Map enrichments back to results
     enriched_count = 0
-    for batch_idx, (result_idx, entry) in enumerate(to_enrich):
+    for batch_idx, (result_idx, _) in enumerate(to_enrich):
+        h = results[result_idx]["hash"]
         raw = enrichments.get(str(batch_idx))
         if raw is None:
+            # Claude gave no answer for this meal, so a later run can try again.
+            _warn(f"entry {h} missing from the reply — not cached")
             continue
         enriched = _validate_enriched(raw)
-        if enriched is not None:
-            h = results[result_idx]["hash"]
-            results[result_idx]["enriched"] = enriched
-            cache[h] = enriched
-            enriched_count += 1
+        if enriched is None:
+            # Claude answered, but nothing was usable. The marker stops the
+            # same Claude call on each run until it expires.
+            retry = today + timedelta(days=MARKER_MAX_AGE_DAYS)
+            _warn(
+                f"entry {h} had no usable field — cached as not enriched, "
+                f"retry on {retry.isoformat()}"
+            )
+            cache[h] = {MARKER_KEY: today.isoformat()}
+            continue
+        results[result_idx]["enriched"] = enriched
+        cache[h] = enriched
+        enriched_count += 1
 
     print(f"  Enriched {enriched_count}/{len(to_enrich)} entries.")
 
@@ -343,8 +425,9 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    # Exit 3 is a partial result. pipeline.sh treats each other non-zero code
-    # as a failed enrichment step.
+    # Exit 3 is a partial result, and pipeline.sh warns "Menu enrichment
+    # incomplete". Each other non-zero code gets the warning "Menu enrichment
+    # failed". The run continues in both cases.
     print(
         f"WARNING: {result.needed - result.enriched} of {result.needed} "
         "menu entries not enriched",
