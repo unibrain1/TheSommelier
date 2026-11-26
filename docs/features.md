@@ -117,6 +117,7 @@ It turns on when `HEALTHCHECK_URL` is set. To turn it off, remove the setting.
 | Key | Kind | Default |
 | --- | --- | --- |
 | `HEALTHCHECK_URL` | secret (the URL holds the key) | none |
+| `HEALTHCHECK_DIGEST_URL` | secret (the URL holds the key) | none |
 
 The check schedule on Healthchecks.io must match `SYNC_SCHEDULE`. If it does not match, the check reports "down" when no run is due. For the default schedule, use these settings:
 
@@ -145,9 +146,18 @@ When the community notes feed has some items that the sync cannot read, the run 
 
 A failed run sends the body `Pipeline failed at step: <step>. Check container logs for details.` The step name is one of a fixed set, such as `settings`, `fetch`, `parse`, `plan`, `compare`, `pairing` or `publish`. The body holds no secret.
 
-The scheduled digest send (`DIGEST_SEND_SCHEDULE`) also pings `HEALTHCHECK_URL`. It sends a fail ping with the cause when the send fails. It also sends a fail ping when `digest.json` is stale. The file is stale when it is not for today. There are two causes. The last sync did not finish, or it did not make a new digest. Or `DIGEST_SEND_SCHEDULE` fires before the first `SYNC_SCHEDULE` run of the day. The digest schedule must fire after the first sync of the day. The default schedules follow this rule. Healthchecks.io then sends its alert. The next successful sync sends a success ping, and the check returns to up.
+The scheduled digest send (`DIGEST_SEND_SCHEDULE`) also pings Healthchecks.io. It sends a fail ping with the cause in these cases:
 
-A manual run with `--dry-run` or `--force` sends no ping. So does a digest run that reports "Nothing to send", "already sent" or "not configured".
+- The send fails.
+- `digest.json` is stale. The file is stale when it is not for today. There are two causes. The last sync did not finish, or it did not make a new digest. Or `DIGEST_SEND_SCHEDULE` fires before the first `SYNC_SCHEDULE` run of the day. The digest schedule must fire after the first sync of the day. The default schedules follow this rule.
+- The SMTP server refuses some recipients. The others get the email. The ping body names how many recipients the server refused, for example `Digest sent, but the SMTP server refused 1 of 2 recipients.` It names no address. The log names the refused addresses.
+
+Where the digest send pings depends on `HEALTHCHECK_DIGEST_URL`:
+
+- **`HEALTHCHECK_DIGEST_URL` set.** Make a second check on Healthchecks.io for the digest, with the schedule of `DIGEST_SEND_SCHEDULE`. Each scheduled send pings this check. A send that completes, or that has nothing to do ("Nothing to send", "already sent", "not configured"), sends a success ping. A failed send sends a fail ping. The fail state stays until the next scheduled send.
+- **`HEALTHCHECK_DIGEST_URL` not set.** A failed send sends a fail ping to `HEALTHCHECK_URL`. A good send sends no ping. The next successful sync sends a success ping to the same check, so the fail state of a digest ping lasts only until that sync, often 30 minutes or less. Healthchecks.io sends its alert when the check goes down, so you still get the alert.
+
+A manual run with `--dry-run` or `--force` sends no ping.
 
 ## Container health check
 

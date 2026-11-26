@@ -35,6 +35,10 @@ FEATURES = {
         None,
         {"HEALTHCHECK_URL": "https://hc-ping.com/SECRET-canary-hckey/the-sommelier"},
     ),
+    "healthcheck_digest": (
+        None,
+        {"HEALTHCHECK_DIGEST_URL": "https://hc-ping.com/SECRET-canary-hckey/digest"},
+    ),
     "menu": (
         None,
         {"GOOGLE_CALENDAR_ICS_URL": "https://example.com/SECRET-canary-ics"},
@@ -387,36 +391,36 @@ def test_healthcheck_trailing_slash_gives_no_double_slash(clean_env, suffix):
     assert settings.healthcheck_url("fail") == f"https://hc.example.test/{HC_KEY}/fail"
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        f"ftp://x/{HC_KEY}",
-        f"hc-ping.com/{HC_KEY}",
-        f"javascript:{HC_KEY}",
-        "http://",
-        f"http://[bad/{HC_KEY}",
-        f"https://h:99999/{HC_KEY}",
-        f"https://h:70000/{HC_KEY}",
-        f"https://h:abc/{HC_KEY}",
-        f"https://h:0/{HC_KEY}",
-        f"https://h/{HC_KEY}?q=",
-        f"https://h/{HC_KEY}#x",
-        f"https://h/{HC_KEY}?",
-        f"https://h/{HC_KEY}#",
-        f"https://h/{HC_KEY} x",
-        f"https://h/{HC_KEY}\nx",
-        f"https://h/{HC_KEY}\tx",
-        f"https://h/{HC_KEY}\x01x",
-        f"https://h/{HC_KEY}\x7fx",
-        f"https://h/{HC_KEY}\u00e9",
-        f"https://h/{HC_KEY}\u200bx",
-        f"https://h/{HC_KEY}\u00a0x",
-        f"https://h\u00e9.test/{HC_KEY}",
-        f"https://u@hc-ping.com/{HC_KEY}",
-        f"https://u:p@hc-ping.com/{HC_KEY}",
-        f"https://hc-ping.com\\@evil.test/{HC_KEY}",
-    ],
-)
+REJECTED_HC_URLS = [
+    f"ftp://x/{HC_KEY}",
+    f"hc-ping.com/{HC_KEY}",
+    f"javascript:{HC_KEY}",
+    "http://",
+    f"http://[bad/{HC_KEY}",
+    f"https://h:99999/{HC_KEY}",
+    f"https://h:70000/{HC_KEY}",
+    f"https://h:abc/{HC_KEY}",
+    f"https://h:0/{HC_KEY}",
+    f"https://h/{HC_KEY}?q=",
+    f"https://h/{HC_KEY}#x",
+    f"https://h/{HC_KEY}?",
+    f"https://h/{HC_KEY}#",
+    f"https://h/{HC_KEY} x",
+    f"https://h/{HC_KEY}\nx",
+    f"https://h/{HC_KEY}\tx",
+    f"https://h/{HC_KEY}\x01x",
+    f"https://h/{HC_KEY}\x7fx",
+    f"https://h/{HC_KEY}\u00e9",
+    f"https://h/{HC_KEY}\u200bx",
+    f"https://h/{HC_KEY}\u00a0x",
+    f"https://h\u00e9.test/{HC_KEY}",
+    f"https://u@hc-ping.com/{HC_KEY}",
+    f"https://u:p@hc-ping.com/{HC_KEY}",
+    f"https://hc-ping.com\\@evil.test/{HC_KEY}",
+]
+
+
+@pytest.mark.parametrize("url", REJECTED_HC_URLS)
 def test_healthcheck_rejected_url_turns_feature_off_without_value(clean_env, url):
     clean_env.setenv("HEALTHCHECK_URL", url)
     state = settings.feature("healthcheck")
@@ -432,6 +436,61 @@ def test_healthcheck_rejected_url_turns_feature_off_without_value(clean_env, url
     info, warnings, errors = settings.check_lines()
     assert any("HEALTHCHECK_URL" in w for w in warnings)
     assert HC_KEY not in "\n".join(info + warnings + errors)
+
+
+def test_healthcheck_digest_url_is_used_as_given(clean_env):
+    sync = f"https://hc-ping.com/{HC_KEY}/the-sommelier"
+    digest = f"https://hc-ping.com/{HC_KEY}/digest"
+    clean_env.setenv("HEALTHCHECK_URL", sync)
+    clean_env.setenv("HEALTHCHECK_DIGEST_URL", digest + "/")
+    assert settings.feature("healthcheck_digest").on is True
+    assert settings.healthcheck_url(check="digest") == digest
+    assert settings.healthcheck_url("fail", check="digest") == digest + "/fail"
+    # The sync check keeps its own URL.
+    assert settings.healthcheck_url() == sync
+    assert settings.healthcheck_url("fail", check="sync") == sync + "/fail"
+
+
+def test_healthcheck_digest_off_gives_no_url_even_with_sync_on(clean_env):
+    clean_env.setenv("HEALTHCHECK_URL", f"https://hc-ping.com/{HC_KEY}")
+    assert settings.feature("healthcheck_digest").kind == "not_configured"
+    assert settings.healthcheck_url(check="digest") is None
+    assert settings.healthcheck_url("fail", check="digest") is None
+
+
+def test_healthcheck_url_unknown_check_raises(clean_env):
+    clean_env.setenv("HEALTHCHECK_URL", f"https://hc-ping.com/{HC_KEY}")
+    with pytest.raises(ValueError):
+        settings.healthcheck_url(check="nope")
+
+
+@pytest.mark.parametrize("url", REJECTED_HC_URLS)
+def test_healthcheck_digest_rejected_url_turns_feature_off_without_value(
+    clean_env, url
+):
+    clean_env.setenv("HEALTHCHECK_DIGEST_URL", url)
+    state = settings.feature("healthcheck_digest")
+    assert state.on is False
+    assert state.kind == "incomplete"
+    assert state.problems == ["HEALTHCHECK_DIGEST_URL"]
+    assert state.log_line() == (
+        "healthcheck_digest: off (missing or not valid: HEALTHCHECK_DIGEST_URL)"
+    )
+    assert settings.healthcheck_url(check="digest") is None
+    assert settings.healthcheck_url("fail", check="digest") is None
+    info, warnings, errors = settings.check_lines()
+    assert any("HEALTHCHECK_DIGEST_URL" in w for w in warnings)
+    assert HC_KEY not in "\n".join(info + warnings + errors)
+
+
+def test_healthcheck_digest_op_url_is_one_unresolved_problem(clean_env):
+    clean_env.setenv("HEALTHCHECK_DIGEST_URL", "op://vault/item/url")
+    state = settings.feature("healthcheck_digest")
+    assert state.on is False
+    assert state.problems == ["HEALTHCHECK_DIGEST_URL"]
+    _, warnings, _ = settings.check_lines()
+    assert any("op run" in w for w in warnings)
+    assert not any("vault/item" in w for w in warnings)
 
 
 def test_healthcheck_op_url_is_one_unresolved_problem(clean_env):
@@ -1208,13 +1267,17 @@ def test_check_accepts_printable_and_non_ascii_credentials():
 
 HTTP_WARNING = {
     var: f"WARNING: {var} uses http. The value holds a secret. Use https."
-    for var in ("HEALTHCHECK_URL", "GOOGLE_CALENDAR_ICS_URL")
+    for var in ("HEALTHCHECK_URL", "HEALTHCHECK_DIGEST_URL", "GOOGLE_CALENDAR_ICS_URL")
 }
 
 
 @pytest.mark.parametrize(
     ("name", "var"),
-    [("healthcheck", "HEALTHCHECK_URL"), ("menu", "GOOGLE_CALENDAR_ICS_URL")],
+    [
+        ("healthcheck", "HEALTHCHECK_URL"),
+        ("healthcheck_digest", "HEALTHCHECK_DIGEST_URL"),
+        ("menu", "GOOGLE_CALENDAR_ICS_URL"),
+    ],
 )
 @pytest.mark.parametrize("scheme", ["http", "HTTP"])
 def test_check_warns_http_url_without_value(name, var, scheme):
@@ -1228,7 +1291,7 @@ def test_check_warns_http_url_without_value(name, var, scheme):
     assert "SECRET-canary" not in result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("var", ["HEALTHCHECK_URL", "GOOGLE_CALENDAR_ICS_URL"])
+@pytest.mark.parametrize("var", list(HTTP_WARNING))
 def test_check_gives_no_http_warning_for_https_or_a_bad_url(var):
     for url in ("https://h.example.test/x", "http://"):
         result = run_cli(["check"], {**REQUIRED_VALUES, var: url})

@@ -346,18 +346,148 @@ class TestMain:
         data, _ = digest_dirs
         set_creds(monkeypatch)
         smtp.refuse = {"b@example.com": (550, b"no such user")}
-        send_digest.main()
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 4
         out, err = capsys.readouterr()
         assert "Digest sent to a@example.com\n" in out
         assert "WARNING: The server refused: b@example.com" in err
         assert (data / "digest_last_sent.txt").read_text() == "2026-04-18"
+
+    def test_main_partly_refused_writes_counts_to_ping_message_file(
+        self, digest_dirs, monkeypatch, smtp, tmp_path
+    ):
+        message_file = tmp_path / "ping.txt"
+        monkeypatch.setattr(
+            "sys.argv", ["send_digest.py", "--ping-message-file", str(message_file)]
+        )
+        set_creds(monkeypatch)
+        smtp.refuse = {"b@example.com": (550, b"no such user")}
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 4
+        text = message_file.read_text(encoding="utf-8")
+        assert text == (
+            "Digest sent, but the SMTP server refused 1 of 2 recipients. "
+            "Check container logs for details.\n"
+        )
+        assert "@" not in text
+
+    def test_main_partly_refused_without_option_writes_no_file(
+        self, digest_dirs, monkeypatch, smtp, tmp_path
+    ):
+        set_creds(monkeypatch)
+        smtp.refuse = {"b@example.com": (550, b"no such user")}
+        before = sorted(tmp_path.rglob("*"))
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 4
+        after = sorted(tmp_path.rglob("*"))
+        assert [p for p in after if p not in before] == [
+            digest_dirs[0] / "digest_last_sent.txt"
+        ]
+
+    def test_main_ping_message_file_write_error_warns_and_exits_4(
+        self, digest_dirs, monkeypatch, smtp, tmp_path, capsys
+    ):
+        message_file = tmp_path / "missing-dir" / "ping.txt"
+        monkeypatch.setattr(
+            "sys.argv", ["send_digest.py", "--ping-message-file", str(message_file)]
+        )
+        set_creds(monkeypatch)
+        smtp.refuse = {"b@example.com": (550, b"no such user")}
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 4
+        assert "WARNING: Could not write the ping message file" in (
+            capsys.readouterr().err
+        )
+
+    def test_main_ping_message_file_without_value_exits_1(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        monkeypatch.setattr("sys.argv", ["send_digest.py", "--ping-message-file"])
+        set_creds(monkeypatch)
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 1
+        assert "ERROR: --ping-message-file needs a file path" in (
+            capsys.readouterr().err
+        )
+        assert smtp.instances == []
+
+    def test_main_all_refused_exits_1(self, digest_dirs, monkeypatch, capsys):
+        class RefuseAll(RecordingSMTP):
+            def send_message(self, msg):
+                raise smtplib.SMTPRecipientsRefused(
+                    {"a@example.com": (550, b"x"), "b@example.com": (550, b"x")}
+                )
+
+        monkeypatch.setattr(smtplib, "SMTP", RefuseAll)
+        set_creds(monkeypatch)
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 1
+        assert "SMTPRecipientsRefused" in capsys.readouterr().err
+        assert not (digest_dirs[0] / "digest_last_sent.txt").exists()
+
+    def test_main_truncated_digest_json_exits_1_without_traceback(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        _, site = digest_dirs
+        (site / "digest.json").write_text('{"date": "2026-04-18", "has_', "utf-8")
+        set_creds(monkeypatch)
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 1
+        out, err = capsys.readouterr()
+        assert "ERROR:" in err
+        assert "not valid JSON (line 1, column " in err
+        assert "The next sync writes a new digest." in err
+        assert "Traceback" not in out + err
+        assert smtp.instances == []
+
+    def test_main_mark_sent_error_warns_and_exits_0(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        set_creds(monkeypatch)
+
+        def fail_mark_sent():
+            raise PermissionError("read-only")
+
+        monkeypatch.setattr("send_digest.mark_sent", fail_mark_sent)
+        send_digest.main()
+        out, err = capsys.readouterr()
+        assert "Digest sent to a@example.com, b@example.com" in out
+        assert (
+            "WARNING: The digest went, but the sent date could not be saved "
+            "(PermissionError). The next scheduled run can send it again." in err
+        )
+
+    def test_main_mark_sent_error_with_refusal_exits_4(
+        self, digest_dirs, monkeypatch, smtp, capsys
+    ):
+        set_creds(monkeypatch)
+        smtp.refuse = {"b@example.com": (550, b"no such user")}
+
+        def fail_mark_sent():
+            raise OSError("disk full")
+
+        monkeypatch.setattr("send_digest.mark_sent", fail_mark_sent)
+        with pytest.raises(SystemExit) as exc:
+            send_digest.main()
+        assert exc.value.code == 4
+        err = capsys.readouterr().err
+        assert "the sent date could not be saved (OSError)" in err
+        assert "WARNING: The server refused: b@example.com" in err
 
     def test_main_refused_named_recipient_is_not_listed_as_sent(
         self, digest_dirs, monkeypatch, smtp, capsys
     ):
         set_creds(monkeypatch, DIGEST_RECIPIENTS="a@example.com,Bee <b@example.com>")
         smtp.refuse = {"b@example.com": (550, b"no such user")}
-        send_digest.main()
+        with pytest.raises(SystemExit):
+            send_digest.main()
         out = capsys.readouterr().out
         assert "Digest sent to a@example.com\n" in out
 

@@ -104,6 +104,10 @@ x-sommelier: &sommelier
     # the key, so treat it as a secret. A failed run adds /fail. On when the
     # URL is set.
     # HEALTHCHECK_URL: "${HEALTHCHECK_URL}"
+    # Optional second check for the scheduled digest send. It holds the
+    # key, so treat it as a secret. When set, each scheduled send pings this
+    # check, not HEALTHCHECK_URL.
+    # HEALTHCHECK_DIGEST_URL: "${HEALTHCHECK_DIGEST_URL}"
 
     # --- Home Assistant ---
     # Turns on the data for Home Assistant REST sensors. Default: off.

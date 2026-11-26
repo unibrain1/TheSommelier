@@ -482,3 +482,72 @@ class TestMainWithoutPairingFile:
             generate_digest.main()
 
         assert exc.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# TestMainAtomicWrite: a crash never leaves a cut-off or stale digest
+# ---------------------------------------------------------------------------
+
+
+class TestMainAtomicWrite:
+    @pytest.fixture
+    def site(self, tmp_path, monkeypatch):
+        from datetime import date, timedelta
+
+        monday = date.today() - timedelta(days=date.today().weekday())
+        plan = {"allWeeks": [_week(monday.strftime("%b %-d, %Y"))]}
+        (tmp_path / "plan.json").write_text(json.dumps(plan))
+        monkeypatch.setenv("SITE_DIR", str(tmp_path))
+        monkeypatch.setattr("sys.argv", ["generate_digest.py"])
+        monkeypatch.delenv("GOOGLE_CALENDAR_ICS_URL", raising=False)
+        return tmp_path
+
+    def test_writes_both_files_whole_and_leaves_no_tmp(self, site):
+        with pytest.raises(SystemExit) as exc:
+            generate_digest.main()
+
+        assert exc.value.code == 2
+        digest = json.loads((site / "digest.json").read_text())
+        assert digest["wine"] is not None
+        assert (site / "digest.html").read_text().rstrip().endswith("</html>")
+        assert list(site.glob("*.tmp")) == []
+
+    def test_each_file_has_its_own_tmp_name(self, site, monkeypatch):
+        replaced: list[tuple[str, str]] = []
+        real_replace = Path.replace
+
+        def spy(self, target):
+            replaced.append((self.name, Path(target).name))
+            return real_replace(self, target)
+
+        monkeypatch.setattr(Path, "replace", spy)
+
+        with pytest.raises(SystemExit):
+            generate_digest.main()
+
+        assert replaced == [
+            ("digest.html.tmp", "digest.html"),
+            ("digest.json.tmp", "digest.json"),
+        ]
+
+    def test_failed_replace_exits_1_and_leaves_no_files(
+        self, site, monkeypatch, capsys
+    ):
+        (site / "digest.json").write_text('{"stale": true}')
+        (site / "digest.html").write_text("stale")
+
+        def fail(self, target):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(Path, "replace", fail)
+
+        with pytest.raises(SystemExit) as exc:
+            generate_digest.main()
+
+        assert exc.value.code == 1
+        assert "ERROR: Failed to write digest files: disk full" in (
+            capsys.readouterr().err
+        )
+        assert list(site.glob("*.tmp")) == []
+        assert not (site / "digest.json").exists()
+        assert not (site / "digest.html").exists()

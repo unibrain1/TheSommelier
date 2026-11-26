@@ -5,17 +5,23 @@ Reads digest.json and digest.html from the site folder (SITE_DIR), sends via
 SMTP with STARTTLS. Idempotent: tracks last-sent date in the data folder
 (DATA_DIR) to prevent double-sends. SMTP settings come from settings.py.
 
-Usage: send_digest.py [--dry-run] [--force]
+Usage: send_digest.py [--dry-run] [--force] [--ping-message-file PATH]
   --dry-run  Print the email subject and recipient list without sending
   --force    Send even if digest has no content or already sent today
+  --ping-message-file PATH
+             When the server refuses some recipients, write a one-line
+             message with the counts (no addresses) to PATH. Only
+             send_digest.sh sets this option, on the scheduled run
 
 Exit codes:
   0  Sent, or nothing to do (not configured, nothing to send, already sent).
      With --dry-run, the script goes on when the digest is not configured
-  1  Send failure, missing digest file, settings that are not valid, or a
-     crash
+  1  Send failure, missing digest file, digest.json that is not valid JSON,
+     settings that are not valid, a usage error, or a crash
   3  digest.json is not for today, and --force is not set. The last sync did
      not finish, or it did not make a new digest
+  4  Sent, but the server refused some recipients. The sent date is saved
+     when it can be
 """
 
 import json
@@ -99,9 +105,41 @@ def send_email(msg: MIMEMultipart, smtp_settings: settings.SmtpSettings) -> list
         return sorted(server.send_message(msg))
 
 
+def _ping_message_file(argv: list[str]) -> Path | None:
+    """Return the path after --ping-message-file, or None without the option.
+
+    Exit 1 when the option has no value.
+    """
+    if "--ping-message-file" not in argv:
+        return None
+    index = argv.index("--ping-message-file") + 1
+    if index >= len(argv) or argv[index].startswith("--"):
+        print("ERROR: --ping-message-file needs a file path", file=sys.stderr)
+        sys.exit(1)
+    return Path(argv[index])
+
+
+def _write_ping_message(path: Path, refused: int, total: int) -> None:
+    """Write the refusal count for the fail ping. Warn on a write error."""
+    message = (
+        f"Digest sent, but the SMTP server refused {refused} of {total} "
+        "recipients. Check container logs for details.\n"
+    )
+    try:
+        path.write_text(message, encoding="utf-8")
+    except OSError as e:
+        # The ping can use its fixed text, so a write error must not hide
+        # the send result.
+        print(
+            f"WARNING: Could not write the ping message file ({type(e).__name__})",
+            file=sys.stderr,
+        )
+
+
 def main() -> None:
     dry_run = "--dry-run" in sys.argv
     force = "--force" in sys.argv
+    ping_message_file = _ping_message_file(sys.argv)
 
     state = settings.feature("digest")
     # No digest settings at all is a normal state (settings.py check logs it),
@@ -121,7 +159,17 @@ def main() -> None:
         )
         sys.exit(1)
 
-    digest = json.loads(digest_json.read_text(encoding="utf-8"))
+    try:
+        digest = json.loads(digest_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        # The sync writes the file atomically, so damage comes from outside
+        # the sync. Give the position only, because the file text holds the menu.
+        print(
+            f"ERROR: {digest_json} is not valid JSON (line {e.lineno}, "
+            f"column {e.colno}). The next sync writes a new digest.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if not digest_html.exists():
         print(f"ERROR: {digest_html} not found", file=sys.stderr)
@@ -183,12 +231,23 @@ def main() -> None:
         sys.exit(1)
 
     # The other recipients got the email, so a resend would duplicate it.
-    mark_sent()
+    try:
+        mark_sent()
+    except OSError as e:
+        # The email went, so the exit code must report the send, not the save.
+        print(
+            "WARNING: The digest went, but the sent date could not be saved "
+            f"({type(e).__name__}). The next scheduled run can send it again.",
+            file=sys.stderr,
+        )
     # smtplib gives the refused recipients as bare addresses, without a name.
     sent = [r for r in recipients if parseaddr(r)[1] not in refused]
     print(f"Digest sent to {', '.join(sent)}")
     if refused:
         print(f"WARNING: The server refused: {', '.join(refused)}", file=sys.stderr)
+        if ping_message_file is not None:
+            _write_ping_message(ping_message_file, len(refused), len(recipients))
+        sys.exit(4)
 
 
 if __name__ == "__main__":
