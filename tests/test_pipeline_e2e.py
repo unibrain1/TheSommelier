@@ -568,6 +568,80 @@ def test_pipeline_community_notes_off_and_on(harness):
     assert cache["200001"][0]["score"] == 93
 
 
+COMMUNITY_FAILED = (
+    "- WARNING: Community notes fetch failed — continuing without community notes"
+)
+COMMUNITY_INCOMPLETE = "- WARNING: Community notes incomplete — some feed items skipped"
+
+
+def _community_ping(harness, feed: str | None = None):
+    """Run the pipeline with a community feed. Return the result and the ping warnings.
+
+    feed is the body to serve at /rss. None uses the feed of the harness server.
+    """
+    server = harness.server if feed is None else LocalServer(feed)
+    if feed is not None:
+        server.start()
+    try:
+        result = harness.run(
+            "fetch_docker.sh",
+            extra={
+                **_enable_healthcheck(harness),
+                "CT_COMMUNITY_NOTES_RSS": f"{server.base_url}/rss",
+            },
+        )
+    finally:
+        if feed is not None:
+            server.stop()
+    assert result.returncode == 0, _output(result)
+    count, listed = _warning_lines(harness.server.posts[-1][1])
+    assert count == len(listed)
+    return result, listed
+
+
+def test_community_feed_that_is_html_is_listed_in_the_success_ping(harness):
+    # A CK token that stops working gives an HTML login page, not RSS.
+    result, listed = _community_ping(
+        harness, "<!DOCTYPE html><html><body>Please log in&nbsp;<br></body></html>"
+    )
+
+    assert "ERROR: RSS body is not an RSS feed" in result.stderr
+    assert "Please log in" not in _output(result)
+    assert COMMUNITY_FAILED in listed
+    assert not (Path(harness.env["DATA_DIR"]) / "community_notes.json").exists()
+
+
+def test_community_feed_with_a_skipped_item_is_listed_in_the_success_ping(harness):
+    no_inote = (
+        "<item><title>x</title>"
+        "<link>https://www.cellartracker.com/notes.asp?iWine=999</link></item>"
+    )
+    feed = build_community_rss().replace("</channel>", no_inote + "</channel>")
+
+    result, listed = _community_ping(harness, feed)
+
+    assert "WARNING: 1 RSS items skipped" in result.stderr
+    assert COMMUNITY_INCOMPLETE in listed
+    cache = json.loads(
+        (Path(harness.env["DATA_DIR"]) / "community_notes.json").read_text()
+    )
+    assert list(cache) == ["200001"]
+
+
+def test_corrupt_community_cache_is_kept_and_listed_in_the_success_ping(harness):
+    data = Path(harness.env["DATA_DIR"])
+    data.mkdir(parents=True)
+    cache = data / "community_notes.json"
+    corrupt = b'{"200001": [{"iNote": "1"'
+    cache.write_bytes(corrupt)
+
+    result, listed = _community_ping(harness)
+
+    assert "not overwritten" in result.stderr
+    assert cache.read_bytes() == corrupt
+    assert COMMUNITY_FAILED in listed
+
+
 def test_fetch_sh_runs_locally(harness):
     (harness.app / ".env").write_text(
         f"USERNAME='{FAKE_USER}'\n"

@@ -1,10 +1,12 @@
 """Tests for enrich_menu.py — prompt building, JSON extraction, cache."""
 
 import json
+from datetime import date, timedelta
 from unittest.mock import patch
 
 
 from enrich_menu import (
+    MARKER_KEY,
     _validate_enriched,
     build_enrichment_prompt,
     enrich_menu,
@@ -340,7 +342,7 @@ class TestEnrichMenuRepairsCache:
         assert "WARNING: enrichment cache was list" in err
         assert "SECRET-a" not in err
 
-    def test_bad_reply_from_claude_is_not_cached(self, tmp_path):
+    def test_bad_reply_from_claude_is_cached_as_marker(self, tmp_path):
         menu_path = tmp_path / "menu.json"
         cache_path = tmp_path / "cache.json"
         menu_path.write_text(
@@ -354,11 +356,142 @@ class TestEnrichMenuRepairsCache:
         )
         reply = json.dumps({"0": "pork", "1": {"richness": "extreme"}})
 
-        with patch("enrich_menu.call_claude", return_value=reply):
-            results = enrich_menu(menu_path, cache_path).results
+        today = date(2026, 6, 1)
 
-        assert json.loads(cache_path.read_text(encoding="utf-8")) == {}
+        with patch("enrich_menu.call_claude", return_value=reply):
+            results = enrich_menu(menu_path, cache_path, today=today).results
+
+        # Claude answered for both meals, but gave nothing usable.
+        marker = {MARKER_KEY: "2026-06-01"}
+        assert json.loads(cache_path.read_text(encoding="utf-8")) == {
+            text_hash("Pork chop"): marker,
+            text_hash("Salmon"): marker,
+        }
         assert [r["enriched"] for r in results] == [None, None]
+
+
+TODAY = date(2026, 6, 10)
+
+
+def _marker(days_old: int) -> dict:
+    return {MARKER_KEY: (TODAY - timedelta(days=days_old)).isoformat()}
+
+
+class TestLoadCacheMarker:
+    """load_cache keeps a fresh marker and drops an expired or bad one."""
+
+    def _load(self, tmp_path, entry):
+        p = tmp_path / "cache.json"
+        p.write_text(json.dumps({"h": entry}), encoding="utf-8")
+        return load_cache(p, today=TODAY)
+
+    def test_marker_from_today_kept(self, tmp_path):
+        assert self._load(tmp_path, _marker(0)) == {"h": _marker(0)}
+
+    def test_marker_1_day_old_kept(self, tmp_path):
+        assert self._load(tmp_path, _marker(1)) == {"h": _marker(1)}
+
+    def test_marker_2_days_old_dropped(self, tmp_path):
+        assert self._load(tmp_path, _marker(2)) == {}
+
+    def test_marker_with_bad_date_dropped(self, tmp_path):
+        assert self._load(tmp_path, {MARKER_KEY: "not a date"}) == {}
+
+    def test_marker_with_date_that_is_not_text_dropped(self, tmp_path):
+        assert self._load(tmp_path, {MARKER_KEY: 20260610}) == {}
+
+    def test_marker_with_future_date_dropped(self, tmp_path):
+        assert self._load(tmp_path, _marker(-1)) == {}
+
+    def test_entry_with_no_usable_field_still_dropped(self, tmp_path):
+        assert self._load(tmp_path, {"richness": "extreme"}) == {}
+
+
+class TestEnrichMenuMarker:
+    """A meal that Claude answered with no usable field gets a dated marker."""
+
+    def _run(self, tmp_path, reply, today=TODAY, meals=("Pork chop",)):
+        menu_path = tmp_path / "menu.json"
+        _write_menu(menu_path, list(meals))
+        cache_path = tmp_path / "cache.json"
+        with patch("enrich_menu.call_claude", return_value=reply) as mock_claude:
+            result = enrich_menu(menu_path, cache_path, today=today)
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        return result, cache, mock_claude
+
+    def test_no_usable_field_writes_marker_and_one_line(self, tmp_path, capsys):
+        reply = json.dumps({"0": {"richness": "extreme"}})
+        result, cache, _ = self._run(tmp_path, reply)
+        h = text_hash("Pork chop")
+        assert cache == {h: {MARKER_KEY: TODAY.isoformat()}}
+        assert result.enriched == 0
+        assert result.results[0]["enriched"] is None
+        lines = [line for line in capsys.readouterr().err.splitlines() if h in line]
+        assert lines == [
+            f"WARNING: enrichment entry {h} had no usable field — "
+            "cached as not enriched until 2026-06-12"
+        ]
+        assert "Pork" not in "\n".join(lines)
+
+    def test_missing_index_writes_no_marker_and_one_line(self, tmp_path, capsys):
+        reply = json.dumps({"0": {"protein": "pork"}})
+        result, cache, _ = self._run(tmp_path, reply, meals=("Pork chop", "Salmon"))
+        h = text_hash("Salmon")
+        assert h not in cache
+        assert cache[text_hash("Pork chop")] == {"protein": "pork"}
+        assert result.enriched == 1
+        lines = [line for line in capsys.readouterr().err.splitlines() if h in line]
+        assert lines == [
+            f"WARNING: enrichment entry {h} missing from the reply — not cached"
+        ]
+
+    def test_empty_reply_writes_no_marker(self, tmp_path):
+        _, cache, _ = self._run(tmp_path, "")
+        assert cache == {}
+
+    def test_second_run_makes_no_claude_call(self, tmp_path):
+        menu_path = tmp_path / "menu.json"
+        _write_menu(menu_path, ["Pork chop"])
+        args = [
+            "enrich_menu.py",
+            str(menu_path),
+            str(tmp_path / "cache.json"),
+            str(tmp_path / "full.json"),
+        ]
+        reply = json.dumps({"0": {"richness": "extreme"}})
+        with (
+            patch("enrich_menu.call_claude", return_value=reply) as mock_claude,
+            patch("enrich_menu.date") as mock_date,
+        ):
+            mock_date.today.return_value = TODAY
+            mock_date.fromisoformat = date.fromisoformat
+            assert main(args) == 1
+            assert main(args) == 0
+        assert mock_claude.call_count == 1
+        full = json.loads((tmp_path / "full.json").read_text(encoding="utf-8"))
+        assert full[0]["enriched"] is None
+
+    def test_marker_on_the_next_day_makes_no_call_and_is_logged(self, tmp_path, capsys):
+        self._run(tmp_path, json.dumps({"0": {"richness": "extreme"}}))
+        capsys.readouterr()
+        result, _, mock_claude = self._run(
+            tmp_path, "", today=TODAY + timedelta(days=1)
+        )
+        mock_claude.assert_not_called()
+        assert result.needed == 0
+        out = capsys.readouterr().out
+        assert "all 1 entries cached (1 marked as not enriched)" in out
+
+    def test_expired_marker_sent_to_claude_again(self, tmp_path):
+        bad = json.dumps({"0": {"richness": "extreme"}})
+        self._run(tmp_path, bad)
+        good = json.dumps({"0": {"protein": "pork"}})
+        result, cache, mock_claude = self._run(
+            tmp_path, good, today=TODAY + timedelta(days=2)
+        )
+        mock_claude.assert_called_once()
+        assert result.enriched == result.needed == 1
+        assert cache == {text_hash("Pork chop"): {"protein": "pork"}}
 
 
 class TestEnrichMenuNormalizesBeforeCache:

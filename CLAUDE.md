@@ -85,6 +85,7 @@ Implemented in `scripts/generate_plan.py`:
 
 - `wine_keywords.py`: single source of truth for keyword rules + enriched feature rules (protein, preparation, richness, spice, acidity, cuisine)
 - `enrich_menu.py`: LLM extracts 13-field structured food features from menu text, cached by text hash
+- A meal that Claude answers with no usable field gets the marker `{"not_enriched_on": "YYYY-MM-DD"}` in `menu_enriched.json`. The marker stops a new Claude call on the marker date and the day after it. It expires `MARKER_MAX_AGE_DAYS` (2) calendar days after the marker date. Then `load_cache` drops it and the meal goes to Claude again. A marked meal has `"enriched": null` in `menu_enriched_full.json`, so pairing uses keywords
 - Enriched-first fallback: try enriched features, fall back to keyword matching, fall back to neutral
 - Three outcomes: Pairs Well (green), Sommelier Pick (blue), No Match (muted) — each with confidence level (high/medium/low)
 - Suggestions prioritize urgent bottles in their drinking window
@@ -104,7 +105,7 @@ The Home Assistant pull (REST sensors, `HA_ENABLED`) and its troubleshooting ste
 ## Important Conventions
 
 - Weeks begin on Monday
-- Pipeline step exit codes: 0 complete, 1 failed, 3 partial with the output written. `pipeline.sh` counts exit 3 as a warning in the success ping. `send_digest.py` uses 3 for a stale `digest.json`, and `send_digest.sh` sends a fail ping for it. `sync.sh` maps the `flock` exit code 75 (a skipped run) to exit 0 after it logs the skip.
+- Pipeline step exit codes: 0 complete, 1 failed, 3 partial with the output written. `pipeline.sh` counts exit 3 as a warning in the success ping. `generate_notes.py`, `enrich_menu.py` and `fetch_community_notes.py` use 0, 3 and 1, and `pipeline.sh` counts exit 1 from them as a warning too, not a stop. `fetch_community_notes.py` exits 1 for a corrupt `community_notes.json` and does not write over it. `send_digest.py` uses 3 for a stale `digest.json`, and `send_digest.sh` sends a fail ping for it. `sync.sh` maps the `flock` exit code 75 (a skipped run) to exit 0 after it logs the skip.
 - Pairing scores: `"good"`, `"partial"`, `"poor"`, `"neutral"`
 - `pipeline.sh` has all shared logic; `fetch.sh` and `fetch_docker.sh` are thin wrappers. In the container, `sync.sh` runs `fetch_docker.sh` under the lock `/tmp/sync.lock` for the scheduled and the first sync. It logs a skipped run and exits 0
 - The schedule is regenerated from scratch every pipeline run, and notes carry over (`reuse_notes()`) — no manual editing of `plan.json`

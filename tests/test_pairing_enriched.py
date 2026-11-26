@@ -1,6 +1,11 @@
 """Tests for enriched pairing matching in pairing.py."""
 
-from pairing import _build_enriched_index, score_enriched_pairing
+import json
+from datetime import date
+from unittest.mock import patch
+
+from enrich_menu import enrich_menu, text_hash
+from pairing import _build_enriched_index, score_enriched_pairing, suggest_pairings
 
 
 class TestScoreEnrichedPairing:
@@ -149,3 +154,47 @@ class TestBuildEnrichedIndex:
 
     def test_empty_list(self):
         assert _build_enriched_index([]) == {}
+
+
+class TestNotEnrichedMeal:
+    """A meal with no enrichment falls back to the keyword result."""
+
+    MENU = [{"date": "2026-04-20", "meal": "Grilled steak", "keywords": ["steak"]}]
+    PLAN = [
+        {
+            "week": "Week 1",
+            "date": "Apr 20, 2026",
+            "vintage": 2019,
+            "name": "Sauvignon Blanc",
+            "appellation": "Marlborough",
+            "badge": "white",
+        }
+    ]
+
+    def _suggest(self, enriched_value):
+        enriched = [{**self.MENU[0], "enriched": enriched_value}]
+        return suggest_pairings(self.MENU, self.PLAN, [], enriched)
+
+    def test_marked_meal_from_enrich_menu_gives_keyword_result(self, tmp_path):
+        menu_path = tmp_path / "menu.json"
+        cache_path = tmp_path / "cache.json"
+        menu_path.write_text(json.dumps(self.MENU), encoding="utf-8")
+        cache_path.write_text(
+            json.dumps({text_hash("Grilled steak"): {"not_enriched_on": "2026-04-20"}}),
+            encoding="utf-8",
+        )
+        with patch("enrich_menu.call_claude") as mock_claude:
+            results = enrich_menu(
+                menu_path, cache_path, today=date(2026, 4, 21)
+            ).results
+        mock_claude.assert_not_called()
+        assert results[0]["enriched"] is None
+
+        marked = suggest_pairings(self.MENU, self.PLAN, [], results)
+        assert marked == suggest_pairings(self.MENU, self.PLAN, [], None)
+        assert marked[0]["pairing"]["confidence"] == "medium"
+
+    def test_empty_enriched_gives_same_result_as_none(self):
+        empty = self._suggest({})
+        assert empty == self._suggest(None)
+        assert empty[0]["pairing"]["confidence"] == "medium"

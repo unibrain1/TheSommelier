@@ -1,14 +1,19 @@
 """Tests for fetch_community_notes.py — RSS parsing, dedup, cumulative cache."""
 
+import io
 import json
+import xml.etree.ElementTree as ET
 
 import pytest
 
+import fetch_community_notes as fcn
 from fetch_community_notes import (
+    CorruptCacheError,
     load_cache,
     merge_notes,
     parse_rss,
     parse_rss_item,
+    read_cache,
     sanitize_bbcode,
 )
 
@@ -81,8 +86,6 @@ class TestSanitizeBBCode:
 
 class TestParseRssItem:
     def _make_item(self, link, description, title="Wine"):
-        import xml.etree.ElementTree as ET
-
         item = ET.Element("item")
         ET.SubElement(item, "title").text = title
         ET.SubElement(item, "link").text = link
@@ -157,11 +160,12 @@ class TestParseRssItem:
 
 class TestParseRss:
     def test_parses_sample_rss(self):
-        notes = parse_rss(SAMPLE_RSS)
+        notes, skipped = parse_rss(SAMPLE_RSS)
         assert len(notes) == 3
+        assert skipped == 0
 
     def test_first_note_fields(self):
-        notes = parse_rss(SAMPLE_RSS)
+        notes, _ = parse_rss(SAMPLE_RSS)
         n = notes[0]
         assert n["iWine"] == "5522345"
         assert n["iNote"] == "12483504"
@@ -171,17 +175,27 @@ class TestParseRss:
         assert "Cherry and raspberry" in (n["body"] or "")
 
     def test_note_without_score(self):
-        notes = parse_rss(SAMPLE_RSS)
+        notes, _ = parse_rss(SAMPLE_RSS)
         n = notes[1]  # winecritic42 has no score
         assert n["score"] is None
         assert n["author"] == "winecritic42"
 
-    def test_invalid_xml_returns_empty(self):
-        assert parse_rss("not xml at all") == []
+    def test_invalid_xml_raises(self):
+        with pytest.raises(fcn.NotRssError, match="not XML"):
+            parse_rss("not xml at all")
+
+    def test_xml_that_is_not_rss_raises(self):
+        with pytest.raises(fcn.NotRssError, match="root element is not rss"):
+            parse_rss("<html><body>Please log in</body></html>")
 
     def test_empty_channel_returns_empty(self):
         xml = '<?xml version="1.0"?><rss><channel></channel></rss>'
-        assert parse_rss(xml) == []
+        assert parse_rss(xml) == ([], 0)
+
+    def test_counts_skipped_items(self):
+        notes, skipped = parse_rss(PARTIAL_RSS)
+        assert [n["iNote"] for n in notes] == ["12483504"]
+        assert skipped == 1
 
 
 # ---------------------------------------------------------------------------
@@ -262,10 +276,34 @@ class TestLoadCache:
         p.write_text(json.dumps(data))
         assert load_cache(p) == data
 
-    def test_invalid_json_returns_empty(self, tmp_path):
+    def test_invalid_json_returns_empty(self, tmp_path, capsys):
         p = tmp_path / "bad.json"
         p.write_text("{invalid json")
         assert load_cache(p) == {}
+        assert "WARNING: Could not load cache" in capsys.readouterr().err
+
+    def test_non_object_returns_empty(self, tmp_path, capsys):
+        p = tmp_path / "list.json"
+        p.write_text("[1, 2]")
+        assert load_cache(p) == {}
+        assert "WARNING: Could not load cache" in capsys.readouterr().err
+
+
+class TestReadCache:
+    def test_missing_file_returns_empty(self, tmp_path):
+        assert read_cache(tmp_path / "nonexistent.json") == {}
+
+    def test_invalid_json_raises(self, tmp_path):
+        p = tmp_path / "bad.json"
+        p.write_text("{invalid json")
+        with pytest.raises(CorruptCacheError):
+            read_cache(p)
+
+    def test_non_object_raises(self, tmp_path):
+        p = tmp_path / "list.json"
+        p.write_text("[1, 2]")
+        with pytest.raises(CorruptCacheError):
+            read_cache(p)
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +312,6 @@ class TestLoadCache:
 
 
 def test_fetch_error_prints_type_only_never_url_or_token(tmp_path, monkeypatch, capsys):
-    import fetch_community_notes as fcn
-
     url = "https://www.cellartracker.com/rssnote.asp?CK=SECRET-canary-ck-token"
 
     def explode(request, timeout=None):
@@ -284,12 +320,178 @@ def test_fetch_error_prints_type_only_never_url_or_token(tmp_path, monkeypatch, 
     monkeypatch.setattr(fcn.urllib.request, "urlopen", explode)
     cache = tmp_path / "community_notes.json"
 
-    with pytest.raises(SystemExit) as exc:
-        fcn.fetch_community_notes(url, cache)
+    assert fcn.fetch_community_notes(url, cache) == 1
 
-    assert exc.value.code == 1
     captured = capsys.readouterr()
     assert captured.err.strip() == "ERROR: RSS fetch failed (ValueError)"
     assert "SECRET-canary" not in captured.out + captured.err
     assert "cellartracker.com" not in captured.out + captured.err
     assert not cache.exists()
+
+
+# ---------------------------------------------------------------------------
+# Exit codes of fetch_community_notes() and main()
+# ---------------------------------------------------------------------------
+
+FEED_URL = "https://www.cellartracker.com/rssnote.asp?CK=SECRET-canary-ck-token"
+
+EMPTY_RSS = '<?xml version="1.0"?><rss><channel><title>x</title></channel></rss>'
+
+NO_INOTE_ITEM = """<item>
+  <title>No note id</title>
+  <link>https://www.cellartracker.com/notes.asp?iWine=999</link>
+  <guid>https://www.cellartracker.com/notes.asp?iWine=999</guid>
+  <description>Tasted by nobody.
+No note id here.</description>
+</item>"""
+
+PARTIAL_RSS = f"""<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>2024 Drouhin Oregon Roserock Pinot Noir</title>
+  <link>https://www.cellartracker.com/notes.asp?iWine=5522345#iNote12483504</link>
+  <guid>https://www.cellartracker.com/notes.asp?iWine=5522345#iNote12483504</guid>
+  <description>Tasted by nonodannecy. (92 pts.) Tasted 4/11/2026
+Cherry.</description>
+</item>
+{NO_INOTE_ITEM}
+</channel></rss>"""
+
+ALL_SKIPPED_RSS = f"""<?xml version="1.0"?>
+<rss><channel>
+{NO_INOTE_ITEM}
+</channel></rss>"""
+
+HTML_BODY = """<!DOCTYPE html>
+<html><head><title>CellarTracker Login</title></head>
+<body><p>Please sign in secret-login-page-body &nbsp; to continue</p>
+<br></body></html>"""
+
+
+XHTML_BODY = "<!DOCTYPE html><html><body><p>secret-login-page-body</p></body></html>"
+
+
+def _serve(monkeypatch, body: str) -> None:
+    def fake_urlopen(request, timeout=None):
+        return io.BytesIO(body.encode("utf-8"))
+
+    monkeypatch.setattr(fcn.urllib.request, "urlopen", fake_urlopen)
+
+
+class TestFetchExitCodes:
+    def test_valid_feed_returns_0_and_writes_cache(self, tmp_path, monkeypatch):
+        _serve(monkeypatch, SAMPLE_RSS)
+        cache = tmp_path / "community_notes.json"
+
+        assert fcn.fetch_community_notes(FEED_URL, cache) == 0
+
+        data = json.loads(cache.read_text(encoding="utf-8"))
+        assert sorted(data) == ["3344556", "5522345", "7788990"]
+
+    def test_feed_with_no_items_returns_0(self, tmp_path, monkeypatch):
+        _serve(monkeypatch, EMPTY_RSS)
+        cache = tmp_path / "community_notes.json"
+
+        assert fcn.fetch_community_notes(FEED_URL, cache) == 0
+
+    def test_some_items_skipped_returns_3(self, tmp_path, monkeypatch, capsys):
+        _serve(monkeypatch, PARTIAL_RSS)
+        cache = tmp_path / "community_notes.json"
+
+        assert fcn.fetch_community_notes(FEED_URL, cache) == 3
+
+        data = json.loads(cache.read_text(encoding="utf-8"))
+        assert list(data) == ["5522345"]
+        assert data["5522345"][0]["iNote"] == "12483504"
+        err = capsys.readouterr().err
+        assert "WARNING: 1 RSS items skipped" in err
+
+    def test_html_body_returns_1_without_body_or_url(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        _serve(monkeypatch, HTML_BODY)
+        cache = tmp_path / "community_notes.json"
+
+        assert fcn.fetch_community_notes(FEED_URL, cache) == 1
+
+        captured = capsys.readouterr()
+        assert captured.err.startswith("ERROR: RSS body is not an RSS feed (not XML:")
+        assert "check CT_COMMUNITY_NOTES_RSS" in captured.err
+        output = captured.out + captured.err
+        assert "secret-login-page-body" not in output
+        assert "SECRET-canary" not in output
+        assert "cellartracker.com" not in output
+        assert not cache.exists()
+
+    def test_well_formed_html_body_returns_1(self, tmp_path, monkeypatch, capsys):
+        # An XHTML login page parses as XML but has no <rss> root.
+        _serve(monkeypatch, XHTML_BODY)
+        cache = tmp_path / "community_notes.json"
+
+        assert fcn.fetch_community_notes(FEED_URL, cache) == 1
+
+        captured = capsys.readouterr()
+        assert captured.err.startswith(
+            "ERROR: RSS body is not an RSS feed (the root element is not rss)"
+        )
+        assert "secret-login-page-body" not in captured.out + captured.err
+        assert not cache.exists()
+
+    def test_all_items_skipped_returns_1_without_write(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        _serve(monkeypatch, ALL_SKIPPED_RSS)
+        cache = tmp_path / "community_notes.json"
+
+        assert fcn.fetch_community_notes(FEED_URL, cache) == 1
+
+        assert not cache.exists()
+        assert "ERROR: all 1 RSS items skipped" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("content", ["{invalid json", "[1, 2]"])
+    def test_corrupt_cache_returns_1_and_keeps_file(
+        self, tmp_path, monkeypatch, capsys, content
+    ):
+        _serve(monkeypatch, SAMPLE_RSS)
+        cache = tmp_path / "community_notes.json"
+        cache.write_text(content, encoding="utf-8")
+        before = cache.read_bytes()
+
+        assert fcn.fetch_community_notes(FEED_URL, cache) == 1
+
+        assert cache.read_bytes() == before
+        assert not cache.with_suffix(".tmp").exists()
+        err = capsys.readouterr().err
+        assert f"ERROR: community notes cache {cache} is corrupt" in err
+        assert "not overwritten" in err
+
+    def test_write_failure_returns_1(self, tmp_path, monkeypatch, capsys):
+        _serve(monkeypatch, SAMPLE_RSS)
+        cache = tmp_path / "community_notes.json"
+        # A folder at the tmp path makes the write fail.
+        cache.with_suffix(".tmp").mkdir()
+
+        assert fcn.fetch_community_notes(FEED_URL, cache) == 1
+
+        assert not cache.exists()
+        assert "ERROR: Failed to write community notes cache" in (
+            capsys.readouterr().err
+        )
+
+
+class TestMain:
+    def test_without_url_returns_1(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("CT_COMMUNITY_NOTES_RSS", raising=False)
+        cache = tmp_path / "community_notes.json"
+
+        assert fcn.main(["fetch_community_notes.py", str(cache)]) == 1
+
+        assert "CT_COMMUNITY_NOTES_RSS" in capsys.readouterr().err
+        assert not cache.exists()
+
+    def test_returns_exit_code_of_fetch(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CT_COMMUNITY_NOTES_RSS", FEED_URL)
+        _serve(monkeypatch, PARTIAL_RSS)
+        cache = tmp_path / "community_notes.json"
+
+        assert fcn.main(["fetch_community_notes.py", str(cache)]) == 3

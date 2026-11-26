@@ -156,7 +156,15 @@ fi
 STEP="community notes"
 if python3 scripts/settings.py enabled community_notes; then
   log "==> Fetching community tasting notes (RSS)..."
-  python3 scripts/fetch_community_notes.py "${DATA_DIR}/community_notes.json" || warn "Community notes fetch failed — continuing without community notes"
+  # Exit 3: some feed items are skipped. Each other non-zero code is a failed
+  # fetch. A corrupt cache gives exit 1, and the script keeps the file.
+  COMMUNITY_RC=0
+  python3 scripts/fetch_community_notes.py "${DATA_DIR}/community_notes.json" || COMMUNITY_RC=$?
+  if [[ ${COMMUNITY_RC} -eq 3 ]]; then
+    warn "Community notes incomplete — some feed items skipped"
+  elif [[ ${COMMUNITY_RC} -ne 0 ]]; then
+    warn "Community notes fetch failed — continuing without community notes"
+  fi
 else
   log "    Skipping community notes — community notes feature is off"
 fi
