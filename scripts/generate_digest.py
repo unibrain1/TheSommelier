@@ -339,16 +339,27 @@ def main() -> None:
 
     json_path = site_dir / "digest.json"
     html_path = site_dir / "digest.html"
-    try:
-        json_path.write_text(
-            json.dumps(digest, indent=2, ensure_ascii=False), encoding="utf-8"
+    # digest.json goes last: send_digest.py reads it as the sign that today's
+    # digest is ready. A temp file plus replace() means a crash never leaves a
+    # cut-off file. with_suffix() would give both files the same temp name.
+    files = [
+        (path, path.with_name(path.name + ".tmp"), text)
+        for path, text in (
+            (html_path, digest_html),
+            (json_path, json.dumps(digest, indent=2, ensure_ascii=False)),
         )
-        html_path.write_text(digest_html, encoding="utf-8")
+    ]
+    try:
+        for path, tmp, text in files:
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(path)
     except OSError as e:
-        # Clean up partial writes so send_digest.py doesn't find stale files
-        json_path.unlink(missing_ok=True)
-        html_path.unlink(missing_ok=True)
+        # Print first: a clean-up error must not hide the cause.
         print(f"ERROR: Failed to write digest files: {e}", file=sys.stderr)
+        # Remove the final files too, so send_digest.py cannot send a stale digest.
+        for path, tmp, _ in files:
+            tmp.unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
         sys.exit(1)
 
     print(f"Digest generated for {digest['date']}")

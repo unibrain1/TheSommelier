@@ -177,6 +177,7 @@ def test_sample_restarts_the_site_service_only(sample):
         "ANTHROPIC_API_KEY",
         "CT_COMMUNITY_NOTES_RSS",
         "HEALTHCHECK_URL",
+        "HEALTHCHECK_DIGEST_URL",
         "GOOGLE_CALENDAR_ICS_URL",
     ],
 )

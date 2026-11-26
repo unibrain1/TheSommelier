@@ -924,6 +924,109 @@ def test_send_digest_sh_good_scheduled_run_sends_no_ping(harness, case, message)
     assert harness.server.posts == []
 
 
+def _enable_digest_check(h: Harness) -> dict[str, str]:
+    return {
+        **_enable_healthcheck(h),
+        "HEALTHCHECK_DIGEST_URL": f"{h.server.base_url}/{KEY_CANARY}/digest",
+    }
+
+
+def _stub_send_digest(harness: Harness, rc: int, message: str = "") -> Path:
+    """Replace send_digest.py in the copy with a stub that exits with rc.
+
+    The stub writes message to the --ping-message-file path and logs that path,
+    so a test can check the text that send_digest.sh pings and that the shell
+    deletes the file. The unit tests cover the real script.
+    """
+    log = harness.root / "stub_args.txt"
+    (harness.app / "scripts" / "send_digest.py").write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"Path({str(log)!r}).write_text(' '.join(sys.argv[1:]))\n"
+        "if '--ping-message-file' in sys.argv:\n"
+        "    path = sys.argv[sys.argv.index('--ping-message-file') + 1]\n"
+        f"    Path(path).write_text({message!r})\n"
+        f"sys.exit({rc})\n",
+        encoding="utf-8",
+    )
+    return log
+
+
+def test_send_digest_sh_partial_refusal_pings_the_count(harness):
+    message = (
+        "Digest sent, but the SMTP server refused 1 of 2 recipients. "
+        "Check container logs for details.\n"
+    )
+    log = _stub_send_digest(harness, 4, message)
+
+    result = harness.run("send_digest.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode == 4, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/the-sommelier/fail"]
+    assert harness.server.posts[0][1] == message.strip()
+    # The shell made the file with mktemp and deleted it at exit.
+    args = log.read_text().split()
+    assert args[0] == "--ping-message-file"
+    assert not Path(args[1]).exists()
+
+
+def test_send_digest_sh_partial_refusal_with_empty_file_pings_fixed_text(harness):
+    _stub_send_digest(harness, 4)
+
+    result = harness.run("send_digest.sh", extra=_enable_healthcheck(harness))
+
+    assert result.returncode == 4, _output(result)
+    assert harness.server.posts[0][1] == (
+        "Digest sent, but the SMTP server refused some recipients. "
+        "Check container logs for details."
+    )
+
+
+@pytest.mark.parametrize(
+    ("rc", "path", "body"),
+    [
+        (0, "/digest", "Digest send complete."),
+        (3, "/digest/fail", "Digest not sent: digest.json is not for today."),
+        (4, "/digest/fail", "refused 1 of 2 recipients"),
+    ],
+)
+def test_send_digest_sh_digest_check_gets_every_scheduled_result(
+    harness, rc, path, body
+):
+    """With HEALTHCHECK_DIGEST_URL, the sync check gets no digest ping."""
+    _stub_send_digest(
+        harness, rc, "Digest sent, but the SMTP server refused 1 of 2 recipients."
+    )
+
+    result = harness.run("send_digest.sh", extra=_enable_digest_check(harness))
+
+    assert result.returncode == rc, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}{path}"]
+    assert body in harness.server.posts[0][1]
+
+
+def test_send_digest_sh_digest_check_clears_on_a_real_good_run(harness):
+    """A real 'Nothing to send' run sends a success ping to the digest check."""
+    _digest_not_sent_case(harness, "nothing_to_send")
+
+    result = harness.run("send_digest.sh", extra=_enable_digest_check(harness))
+
+    assert result.returncode == 0, _output(result)
+    assert harness.server.paths == [f"/{KEY_CANARY}/digest"]
+    assert KEY_CANARY not in result.stdout + result.stderr
+
+
+def test_send_digest_sh_manual_run_sends_no_digest_ping(harness):
+    _stub_send_digest(harness, 0)
+
+    result = harness.run(
+        "send_digest.sh", args=("--force",), extra=_enable_digest_check(harness)
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert harness.server.posts == []
+
+
 def _fake_flock(harness: Harness, rc: int) -> str:
     """Return a PATH with a `flock` that only exits with rc. The host can lack flock."""
     return _stub_bin(harness.root, "flock", rc) + os.pathsep + harness.path

@@ -114,6 +114,7 @@ FEATURES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "claude": (None, (CLAUDE_API_KEY, CLAUDE_OAUTH_TOKEN)),
     "community_notes": (None, ("CT_COMMUNITY_NOTES_RSS",)),
     "healthcheck": (None, ("HEALTHCHECK_URL",)),
+    "healthcheck_digest": (None, ("HEALTHCHECK_DIGEST_URL",)),
     "menu": (None, ("GOOGLE_CALENDAR_ICS_URL",)),
     # Home Assistant pulls the two JSON files, so the app needs no credentials.
     # With no settings to check, only the flag can turn the feature on.
@@ -158,6 +159,15 @@ _MODE_KEY: dict[str, str] = {
     "subscription": CLAUDE_OAUTH_TOKEN,
 }
 _MODE_LABEL: dict[str, str] = {"api_key": "API key", "subscription": "subscription"}
+
+# Healthchecks.io check -> (feature, variable). Both checks use one URL rule,
+# because both URLs hold a ping key and get a /fail suffix.
+_HC_CHECKS: dict[str, tuple[str, str]] = {
+    "sync": ("healthcheck", "HEALTHCHECK_URL"),
+    "digest": ("healthcheck_digest", "HEALTHCHECK_DIGEST_URL"),
+}
+# feature -> URL variable, for the URL check of each feature.
+_HC_VARS: dict[str, str] = dict(_HC_CHECKS.values())
 
 
 class SettingError(ValueError):
@@ -255,8 +265,8 @@ def _smtp_port() -> int | None:
     return port if port is not None and port <= 65535 else None
 
 
-def _hc_url() -> str:
-    return _env("HEALTHCHECK_URL").rstrip("/")
+def _hc_url(var: str) -> str:
+    return _env(var).rstrip("/")
 
 
 def _http_url_valid(url: str) -> bool:
@@ -277,8 +287,8 @@ def _http_url_valid(url: str) -> bool:
     )
 
 
-def _hc_url_valid() -> bool:
-    url = _hc_url()
+def _hc_url_valid(var: str) -> bool:
+    url = _hc_url(var)
     # A query or a fragment, even an empty one, would swallow the /fail suffix.
     # urllib connects to the whole netloc, so userinfo or a backslash gives a
     # host that urlsplit does not see.
@@ -298,11 +308,12 @@ def _invalid_values(name: str) -> list[str]:
         if _smtp_port() is None:
             problems.append("SMTP_PORT")
         problems += [v for v in ("SMTP_HOST", "SMTP_FROM") if _unresolved(_env(v))]
-    elif name == "healthcheck":
-        url = _env("HEALTHCHECK_URL")
+    elif name in _HC_VARS:
+        var = _HC_VARS[name]
+        url = _env(var)
         # An op:// value is already a problem, as an unresolved setting.
-        if url and not _unresolved(url) and not _hc_url_valid():
-            problems.append("HEALTHCHECK_URL")
+        if url and not _unresolved(url) and not _hc_url_valid(var):
+            problems.append(var)
     elif name == "menu":
         url = _env("GOOGLE_CALENDAR_ICS_URL")
         # curl fetches the calendar, so the urllib rules of the ping URL do not
@@ -435,11 +446,18 @@ def smtp() -> SmtpSettings:
     )
 
 
-def healthcheck_url(status: str = "success") -> str | None:
-    """Return HEALTHCHECK_URL (plus /fail), or None when the feature is off."""
-    if not feature("healthcheck").on:
+def healthcheck_url(status: str = "success", check: str = "sync") -> str | None:
+    """Return the ping URL of a check (plus /fail), or None when its feature is off.
+
+    check "sync" uses HEALTHCHECK_URL and "digest" uses HEALTHCHECK_DIGEST_URL.
+    Raises ValueError for an unknown check.
+    """
+    if check not in _HC_CHECKS:
+        raise ValueError(f"unknown check: {check}")
+    name, var = _HC_CHECKS[check]
+    if not feature(name).on:
         return None
-    url = _hc_url()
+    url = _hc_url(var)
     return url + "/fail" if status == "fail" else url
 
 
@@ -545,10 +563,10 @@ def check_lines() -> tuple[list[str], list[str], list[str]]:
         )
         if _unresolved(_env("HEALTH_MAX_AGE_MINUTES")):
             warnings.append(OP_WARNING)
-    # Both URLs hold a secret, which http sends as clear text.
+    # Each URL holds a secret, which http sends as clear text.
     on = {state.name: state.on for state in states}
     for name, var, url in (
-        ("healthcheck", "HEALTHCHECK_URL", _hc_url()),
+        *((n, v, _hc_url(v)) for n, v in _HC_CHECKS.values()),
         ("menu", "GOOGLE_CALENDAR_ICS_URL", _env("GOOGLE_CALENDAR_ICS_URL")),
     ):
         if on[name] and urlsplit(url).scheme == "http":

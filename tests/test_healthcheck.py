@@ -261,6 +261,88 @@ def test_unknown_status_exits_nonzero(server, capsys, argv):
     assert server.requests == []
 
 
+# --- --digest ------------------------------------------------------------
+
+SYNC_PATH = f"/{KEY}/the-sommelier"
+DIGEST_PATH = f"/{KEY}/digest"
+
+
+@pytest.mark.parametrize(
+    ("status", "path"), [("success", DIGEST_PATH), ("fail", DIGEST_PATH + "/fail")]
+)
+def test_digest_on_pings_only_the_digest_check(server, clean_env, status, path):
+    clean_env.setenv("HEALTHCHECK_DIGEST_URL", server.base + DIGEST_PATH)
+    assert healthcheck.main(["--digest", status, "digest msg"]) == 0
+    assert [r["path"] for r in server.requests] == [path]
+    assert server.requests[0]["body"] == b"digest msg"
+
+
+@pytest.mark.parametrize("digest_url", [None, f"ftp://127.0.0.1/{KEY}"])
+def test_digest_off_fail_pings_the_sync_check(server, clean_env, capsys, digest_url):
+    # A digest URL that is not valid turns the digest check off, so the fail
+    # alert must still reach the sync check.
+    if digest_url:
+        clean_env.setenv("HEALTHCHECK_DIGEST_URL", digest_url)
+    assert healthcheck.main(["--digest", "fail", "send failed"]) == 0
+    assert [r["path"] for r in server.requests] == [SYNC_PATH + "/fail"]
+    assert server.requests[0]["body"] == b"send failed"
+    assert KEY not in "".join(capsys.readouterr())
+
+
+def test_digest_off_success_makes_no_request(server, clean_env, monkeypatch):
+    def no_network(request, timeout=None):
+        raise AssertionError("a request was made")
+
+    monkeypatch.setattr(healthcheck.urllib.request, "urlopen", no_network)
+    assert healthcheck.main(["--digest", "success", "sent"]) == 0
+    assert server.requests == []
+
+
+def test_digest_and_sync_both_off_makes_no_request(server, clean_env):
+    clean_env.delenv("HEALTHCHECK_URL")
+    assert healthcheck.main(["--digest", "fail", "x"]) == 0
+    assert healthcheck.main(["--digest", "success", "x"]) == 0
+    assert server.requests == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--digest"],
+        ["--digest", "success"],
+        ["--digest", "bogus", "x"],
+        ["--digest", "--digest", "success", "x"],
+        ["success", "x", "--digest"],
+        ["success", "--digest", "x"],
+    ],
+)
+def test_digest_bad_usage_exits_2(server, clean_env, capsys, argv):
+    clean_env.setenv("HEALTHCHECK_DIGEST_URL", server.base + DIGEST_PATH)
+    assert healthcheck.main(argv) == 2
+    err = capsys.readouterr().err
+    assert err.strip() == "Usage: healthcheck.py [--digest] success|fail <message>"
+    assert server.requests == []
+
+
+def test_script_digest_flag(server):
+    env = {
+        "PATH": os.environ["PATH"],
+        "HEALTHCHECK_URL": server.base + SYNC_PATH,
+        "HEALTHCHECK_DIGEST_URL": server.base + DIGEST_PATH,
+    }
+    script = str(REPO / "scripts" / "healthcheck.py")
+    for status in ("success", "fail"):
+        result = subprocess.run(
+            [sys.executable, script, "--digest", status, "hi"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert KEY not in result.stdout + result.stderr
+    assert [r["path"] for r in server.requests] == [DIGEST_PATH, DIGEST_PATH + "/fail"]
+
+
 def test_script_exit_codes_and_no_key_in_output(server):
     """Run the script as the pipeline does. A dead server still gives exit 0."""
     env = {

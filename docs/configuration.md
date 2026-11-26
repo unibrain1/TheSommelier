@@ -48,5 +48,6 @@ Do not commit `.env`. Git ignores it.
 | `ANTHROPIC_API_KEY` | none | For notes | Claude notes and menu enrichment on your API bill. Set at most one Claude key. See [Claude login](features.md#claude-login). |
 | `CT_COMMUNITY_NOTES_RSS` | none | For community notes | Community notes. RSS URL of the CellarTracker notes feed. It holds a token. |
 | `HEALTHCHECK_URL` | none | For the ping | Healthchecks.io. The full ping URL of the check. It holds the key. On when the URL is set. With `http://`, each sync logs a warning. |
+| `HEALTHCHECK_DIGEST_URL` | none | No | Healthchecks.io. The full ping URL of a second check for the scheduled digest send. It holds the key. When set, the digest send pings this check, not `HEALTHCHECK_URL`. With `http://`, each sync logs a warning. |
 | `HA_ENABLED` | off | No | Home Assistant. Only `true`, `1` or `yes` turns on the Home Assistant data. |
 | `HEALTH_MAX_AGE_MINUTES` | `600` | No | Container health check. Docker marks the container as unhealthy when the plan is older than this many minutes. |
