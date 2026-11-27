@@ -15,6 +15,10 @@ from generate_digest import (
 )
 from wine_utils import find_current_week
 
+# The digest uses the Pacific date (generate_digest._today_local). The CI runner
+# is on UTC, so date.today() is a different day from 16:00 to 24:00 Pacific.
+# Use the same helper here.
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,9 +65,9 @@ def _digest() -> dict:
 
 class TestFindCurrentWeek:
     def test_finds_matching_week(self):
-        from datetime import date, timedelta
+        from datetime import timedelta
 
-        today = date.today()
+        today = generate_digest._today_local()
         monday = today - timedelta(days=today.weekday())
         week = _week(monday.strftime("%b %-d, %Y"))
         result = find_current_week([week], today)
@@ -77,9 +81,7 @@ class TestFindCurrentWeek:
         assert result is None
 
     def test_empty_list(self):
-        from datetime import date
-
-        assert find_current_week([], date.today()) is None
+        assert find_current_week([], generate_digest._today_local()) is None
 
 
 # ---------------------------------------------------------------------------
@@ -112,9 +114,9 @@ class TestFindMealsForDate:
 
 class TestBuildDigest:
     def test_has_content_when_pairings_exist(self, tmp_path):
-        from datetime import date, timedelta
+        from datetime import timedelta
 
-        today = date.today()
+        today = generate_digest._today_local()
         monday = today - timedelta(days=today.weekday())
 
         plan = {
@@ -135,9 +137,9 @@ class TestBuildDigest:
         assert digest["wine"] is not None
 
     def test_no_content_when_no_pairings(self, tmp_path):
-        from datetime import date, timedelta
+        from datetime import timedelta
 
-        today = date.today()
+        today = generate_digest._today_local()
         monday = today - timedelta(days=today.weekday())
 
         plan = {"allWeeks": [_week(monday.strftime("%b %-d, %Y"))]}
@@ -423,9 +425,11 @@ class TestSourceGuard:
 class TestMainWithoutPairingFile:
     @pytest.fixture
     def site(self, tmp_path, monkeypatch):
-        from datetime import date, timedelta
+        from datetime import timedelta
 
-        monday = date.today() - timedelta(days=date.today().weekday())
+        monday = generate_digest._today_local() - timedelta(
+            days=generate_digest._today_local().weekday()
+        )
         plan = {"allWeeks": [_week(monday.strftime("%b %-d, %Y"))]}
         (tmp_path / "plan.json").write_text(json.dumps(plan))
         monkeypatch.setenv("SITE_DIR", str(tmp_path))
@@ -460,10 +464,12 @@ class TestMainWithoutPairingFile:
         assert not (site / "digest.json").exists()
 
     def test_menu_off_with_a_pairing_file_still_uses_it(self, site, monkeypatch):
-        from datetime import date
-
         monkeypatch.delenv("GOOGLE_CALENDAR_ICS_URL", raising=False)
-        pairings = {"suggestions": [_suggestion(date.today().isoformat(), "Dinner")]}
+        pairings = {
+            "suggestions": [
+                _suggestion(generate_digest._today_local().isoformat(), "Dinner")
+            ]
+        }
         (site / "pairing_suggestions.json").write_text(json.dumps(pairings))
 
         generate_digest.main()
